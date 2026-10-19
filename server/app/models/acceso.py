@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, time
+from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, SmallInteger, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Index, SmallInteger, UniqueConstraint, event, text
 from sqlalchemy.dialects.postgresql import INET, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, ORMExecuteState, Session, mapped_column
 
 from app.models.base import Base, ConActualizado, ConCreado, ConId
 
@@ -107,4 +108,24 @@ class Auditoria(ConId, ConCreado, Base):
     entidad_id: Mapped[uuid.UUID | None]
     detalle: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     dispositivo: Mapped[str | None]
-    ip: Mapped[str | None] = mapped_column(INET)
+    ip: Mapped[IPv4Address | IPv6Address | None] = mapped_column(INET)
+
+
+class AuditoriaInmutable(Exception):
+    """Se intentó editar o borrar un registro de auditoría, que solo admite inserciones."""
+
+    def __init__(self) -> None:
+        super().__init__("La auditoría solo admite inserciones: no se edita ni se borra.")
+
+
+@event.listens_for(Auditoria, "before_update")
+@event.listens_for(Auditoria, "before_delete")
+def impedir_cambios_por_objeto(*_: object) -> None:
+    raise AuditoriaInmutable()
+
+
+@event.listens_for(Session, "do_orm_execute")
+def impedir_cambios_masivos(estado: ORMExecuteState) -> None:
+    """Cubre update() y delete() masivos, que no pasan por los eventos del objeto."""
+    if (estado.is_update or estado.is_delete) and Auditoria.__mapper__ in estado.all_mappers:
+        raise AuditoriaInmutable()
