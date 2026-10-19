@@ -363,14 +363,8 @@ def test_un_host_que_no_es_ip_no_se_guarda() -> None:
 
 @pytest.fixture
 def registro_tecnico(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
-    # La migración de la sesión de pruebas aplica el logging de alembic.ini, que deshabilita
-    # los loggers ya creados; se reactiva el de auditoría para poder leerlo.
-    logger = logging.getLogger("app.auditoria")
-    deshabilitado = logger.disabled
-    logger.disabled = False
     with caplog.at_level(logging.WARNING, logger="app.auditoria"):
         yield caplog
-    logger.disabled = deshabilitado
 
 
 def eventos_tecnicos(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
