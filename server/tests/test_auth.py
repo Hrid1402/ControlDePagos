@@ -4,13 +4,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.seguridad import hashear_contrasena, leer_token
+from app.core.seguridad import crear_token, hashear_contrasena, leer_token
 from app.main import app
 from app.models import Auditoria, Usuario
 from tests.conftest import DosGerentes
@@ -353,3 +355,83 @@ def test_los_campos_vacios_se_marcan(
     r = cliente.post(LOGIN, json=cuerpo)
     assert r.status_code == 422
     assert r.json() == {"detail": mensaje, "code": "VALIDACION", "field": campo}
+
+
+# Renovación del token
+
+
+RENOVAR = "/api/v1/auth/renovar"
+
+
+def token_emitido_hace(usuario: Usuario, minutos: int) -> str:
+    """Token de sesión emitido hace unos minutos, con sus 30 minutos de vigencia desde entonces."""
+    emitido = datetime.now(UTC) - timedelta(minutes=minutos)
+    claims = {
+        "sub": str(usuario.id),
+        "rol": usuario.rol,
+        "token_version": usuario.token_version,
+        "iat": emitido,
+        "exp": emitido + timedelta(minutes=settings.jwt_expires_minutes),
+    }
+    return jwt.encode(claims, settings.jwt_secret, algorithm="HS256")
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize("rol", ["gerente", "asistente"])
+def test_renovar_devuelve_un_token_nuevo_que_vence_despues(
+    cliente: TestClient, dos_gerentes: DosGerentes, rol: str
+) -> None:
+    usuario = getattr(dos_gerentes.uno, rol)
+    anterior = token_emitido_hace(usuario, 10)
+    r = cliente.post(RENOVAR, headers=bearer(anterior))
+    assert r.status_code == 200
+    cuerpo = r.json()
+    assert cuerpo["token_type"] == "bearer"
+    assert cuerpo["usuario"] == {"id": str(usuario.id), "nombre": usuario.username, "rol": rol}
+    nuevo = cuerpo["access_token"]
+    assert nuevo != anterior
+    claims = leer_token(nuevo)
+    assert claims.usuario_id == usuario.id
+    assert claims.token_version == usuario.token_version
+    assert claims.expira_en > leer_token(anterior).expira_en
+
+
+def test_renovar_sin_token_responde_no_autenticado(cliente: TestClient) -> None:
+    r = cliente.post(RENOVAR)
+    assert r.status_code == 401
+    assert r.json()["code"] == "NO_AUTENTICADO"
+
+
+def test_renovar_con_token_vencido_responde_no_autenticado(
+    cliente: TestClient, dos_gerentes: DosGerentes
+) -> None:
+    r = cliente.post(RENOVAR, headers=bearer(token_emitido_hace(dos_gerentes.uno.gerente, 31)))
+    assert r.status_code == 401
+    assert r.json()["code"] == "NO_AUTENTICADO"
+
+
+def test_renovar_con_sesion_revocada_responde_sesion_revocada(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    asistente = dos_gerentes.uno.asistente
+    token = crear_token(asistente)
+    asistente.token_version += 1
+    db.flush()
+    r = cliente.post(RENOVAR, headers=bearer(token))
+    assert r.status_code == 401
+    assert r.json()["code"] == "SESION_REVOCADA"
+
+
+def test_renovar_con_cuenta_desactivada_responde_cuenta_inactiva(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    asistente = dos_gerentes.uno.asistente
+    token = crear_token(asistente)
+    asistente.estado = "inactiva"
+    db.flush()
+    r = cliente.post(RENOVAR, headers=bearer(token))
+    assert r.status_code == 401
+    assert r.json()["code"] == "CUENTA_INACTIVA"

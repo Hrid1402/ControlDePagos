@@ -1,4 +1,4 @@
-"""Acceso (H01): login con bloqueo por intentos y estado de cuenta.
+"""Acceso (H01): login con bloqueo por intentos y estado de cuenta, y renovación de la sesión.
 
 Errores del login: 401 CREDENCIALES_INVALIDAS (genérico), 423 CUENTA_BLOQUEADA con los minutos
 restantes en detail y 403 CUENTA_INACTIVA.
@@ -6,7 +6,7 @@ restantes en detail y 403 CUENTA_INACTIVA.
 
 from fastapi import APIRouter
 
-from app.core.dependencias import OrigenSolicitud, SesionDb
+from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
 from app.core.seguridad import crear_token
 from app.models import Usuario
 from app.schemas.acceso import IngresoEntrada, SesionSalida, UsuarioSesion
@@ -27,4 +27,12 @@ def sesion_de(usuario: Usuario) -> SesionSalida:
 @router.post("/login")
 def login(datos: IngresoEntrada, db: SesionDb, origen: OrigenSolicitud) -> SesionSalida:
     usuario = iniciar_sesion(db, datos.username, datos.contrasena, origen)
+    return sesion_de(usuario)
+
+
+@router.post("/renovar")
+def renovar(usuario: UsuarioActual) -> SesionSalida:
+    """Emite un token nuevo de 30 minutos a partir de uno vigente: el cliente lo pide al pulsar
+    continuar o con actividad cerca del vencimiento. Un token vencido, revocado o de una cuenta
+    inactiva responde 401 y lleva al login."""
     return sesion_de(usuario)
