@@ -3,9 +3,9 @@
   "private": true,
   "scripts": {
     "prepare": "husky",
-    "services:up": "docker compose up -d --wait",
+    "services:up": "docker compose up -d --wait && sh docker/seaweedfs/crear-bucket.sh",
     "services:down": "docker compose down",
-    "services:reset": "docker compose down -v && docker compose up -d --wait",
+    "services:reset": "docker compose down -v && pnpm services:up",
     "services:logs": "docker compose logs -f",
     "dev": "concurrently -n client,server -c blue,green \"pnpm --filter client dev\" \"pnpm dev:server\"",
     "dev:server": "cd server && uv run uvicorn app.main:app --reload --port 8000",
