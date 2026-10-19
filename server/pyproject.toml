@@ -60,3 +60,6 @@ known_first_party = ["app"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
