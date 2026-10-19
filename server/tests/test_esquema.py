@@ -37,11 +37,25 @@ def test_existen_las_37_tablas(db: Session) -> None:
     assert total == 37
 
 
+def generar_uuid_v7(db: Session) -> uuid.UUID:
+    return uuid.UUID(str(db.execute(text("SELECT uuid_generate_v7()")).scalar_one()))
+
+
 def test_uuid_v7_ordenado(db: Session) -> None:
-    primero = db.execute(text("SELECT uuid_generate_v7()")).scalar_one()
-    segundo = db.execute(text("SELECT uuid_generate_v7()")).scalar_one()
-    assert uuid.UUID(str(primero)).version == 7
-    assert str(primero) < str(segundo)
+    # UUID v7 solo garantiza orden entre milisegundos distintos: dentro del mismo milisegundo
+    # el resto es aleatorio, así que se compara solo la marca de tiempo (48 bits, 12 hex).
+    primero = generar_uuid_v7(db)
+    segundo = generar_uuid_v7(db)
+    assert primero.version == 7
+    assert segundo.version == 7
+    assert primero.hex[:12] <= segundo.hex[:12]
+
+
+def test_uuid_v7_de_milisegundos_distintos_queda_ordenado(db: Session) -> None:
+    primero = generar_uuid_v7(db)
+    db.execute(text("SELECT pg_sleep(0.002)"))
+    segundo = generar_uuid_v7(db)
+    assert segundo > primero
 
 
 def test_la_base_pone_los_valores_por_defecto(db: Session) -> None:

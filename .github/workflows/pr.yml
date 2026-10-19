@@ -320,6 +320,8 @@ jobs:
         run: |
           if [ -f alembic.ini ]; then
             uv run alembic upgrade head
+            uv run alembic downgrade base
+            uv run alembic upgrade head
             uv run alembic check
           else
             echo "Sin migraciones todavía."

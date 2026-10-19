@@ -1,6 +1,7 @@
 import ipaddress
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Annotated, Protocol
 
@@ -8,12 +9,23 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.errores import ErrorApi
 from app.core.seguridad import leer_token
 from app.models import Usuario
 
 SesionDb = Annotated[Session, Depends(get_db)]
+
+
+def obtener_fabrica_sesiones() -> Callable[[], AbstractContextManager[Session]]:
+    """Abre sesiones cortas bajo demanda. Para conexiones largas como el WebSocket, que no deben
+    retener una conexión del pool mientras están abiertas."""
+    return SessionLocal
+
+
+FabricaSesiones = Annotated[
+    Callable[[], AbstractContextManager[Session]], Depends(obtener_fabrica_sesiones)
+]
 
 esquema_bearer = HTTPBearer(auto_error=False)
 

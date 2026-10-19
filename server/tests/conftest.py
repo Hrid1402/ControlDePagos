@@ -1,4 +1,5 @@
 import os
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ os.environ["DATABASE_URL"] = os.environ.get(
 # Las pruebas no dependen de la clave del .env de cada desarrollador.
 os.environ.setdefault("JWT_SECRET", "clave-de-pruebas-clave-de-pruebas")
 
+from app.core import eventos  # noqa: E402
+from app.core.eventos import Evento  # noqa: E402
 from app.models import Usuario  # noqa: E402
 
 
@@ -66,3 +69,16 @@ def crear_equipo(db: Session, sufijo: str) -> Equipo:
 def dos_gerentes(db: Session) -> DosGerentes:
     """Dos gerentes, cada uno con su asistente activa, para probar el aislamiento."""
     return DosGerentes(uno=crear_equipo(db, "uno"), dos=crear_equipo(db, "dos"))
+
+
+@pytest.fixture
+def publicados(monkeypatch: pytest.MonkeyPatch) -> list[tuple[uuid.UUID, Evento]]:
+    """Captura los eventos que salen tras el commit en lugar de enviarlos a Redis."""
+    salida: list[tuple[uuid.UUID, Evento]] = []
+
+    def capturar(usuario_id: uuid.UUID, evento: Evento) -> bool:
+        salida.append((usuario_id, evento))
+        return True
+
+    monkeypatch.setattr(eventos, "publicar", capturar)
+    return salida
