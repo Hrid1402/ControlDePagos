@@ -17,6 +17,7 @@ class ClaimsToken:
     usuario_id: uuid.UUID
     rol: str
     token_version: int
+    expira_en: datetime
 
 
 def sesion_invalida() -> ErrorApi:
@@ -51,6 +52,7 @@ def leer_token(token: str) -> ClaimsToken:
             usuario_id=uuid.UUID(str(claims["sub"])),
             rol=str(claims["rol"]),
             token_version=int(claims["token_version"]),
+            expira_en=datetime.fromtimestamp(int(claims["exp"]), UTC),
         )
     except (jwt.InvalidTokenError, ValueError, TypeError) as exc:
         raise sesion_invalida() from exc
