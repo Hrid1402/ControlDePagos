@@ -86,7 +86,14 @@ jobs:
       - run: uv run mypy app
       - name: Migraciones
         run: |
-          if [ -f alembic.ini ]; then uv run alembic upgrade head && uv run alembic check; else echo "Sin migraciones todavía."; fi
+          if [ -f alembic.ini ]; then
+            uv run alembic upgrade head
+            uv run alembic downgrade base
+            uv run alembic upgrade head
+            uv run alembic check
+          else
+            echo "Sin migraciones todavía."
+          fi
       - name: Pruebas
         run: |
           if find tests -name "test_*.py" | grep -q .; then uv run pytest --cov=app --cov-fail-under=70; else echo "Sin pruebas todavía."; fi
