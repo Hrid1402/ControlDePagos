@@ -4,6 +4,7 @@ El registro va en la misma transacción que la acción auditada: se agrega y se 
 con flush, pero el commit lo hace quien llama. Si la acción se deshace, el evento también.
 """
 
+import logging
 import uuid
 from collections.abc import Mapping
 from datetime import date, datetime, time
@@ -11,10 +12,15 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen, gerente_de
+from app.core.errores import ErrorApi
 from app.models import Auditoria, Usuario
+
+# Registro técnico: eventos que no tienen gerente al que pertenecer.
+logger = logging.getLogger("app.auditoria")
 
 
 class Accion(StrEnum):
@@ -118,3 +124,27 @@ def registrar_auditoria(
     db.add(registro)
     db.flush()
     return registro
+
+
+def registrar_login_desconocido(origen: Origen) -> None:
+    """Ingreso con un usuario que no existe. No va a la tabla porque no hay gerente al que
+    asignarlo; va al registro técnico. No recibe el nombre escrito: podría ser una contraseña
+    escrita en el campo equivocado."""
+    logger.warning(
+        "Ingreso fallido con una cuenta desconocida (ip=%s, dispositivo=%r)",
+        origen.ip,
+        origen.dispositivo,
+        extra={"evento": "login_desconocido"},
+    )
+
+
+def consulta_historial(usuario: Usuario) -> Select[Auditoria]:
+    """Historial global del gerente, del más reciente al más antiguo. La asistente no tiene
+    acceso; el detalle de una deuda ofrece aparte solo sus eventos autorizados."""
+    if usuario.rol != "gerente":
+        raise ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
+    return (
+        select(Auditoria)
+        .where(Auditoria.gerente_id == usuario.id)
+        .order_by(Auditoria.creado_en.desc(), Auditoria.id.desc())
+    )
