@@ -1,4 +1,4 @@
-MIN_COMMITS=2
+MIN_COMMITS=3
 branch=$(git rev-parse --abbrev-ref HEAD)
 
 if [ "$branch" = "main" ] || [ "$branch" = "dev" ]; then
