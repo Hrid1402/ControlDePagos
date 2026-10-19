@@ -1,8 +1,10 @@
+import ipaddress
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated, Protocol
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -54,16 +56,47 @@ SoloGerente = Annotated[Usuario, Depends(requerir_rol("gerente"))]
 SoloAsistente = Annotated[Usuario, Depends(requerir_rol("asistente"))]
 
 
-def obtener_gerente_id(usuario: UsuarioActual) -> uuid.UUID:
+def gerente_de(usuario: Usuario) -> uuid.UUID | None:
     """Gerente propietario de los datos: el propio gerente o el gerente de la asistente."""
-    if usuario.rol == "gerente":
-        return usuario.id
-    if usuario.gerente_id is None:
+    return usuario.id if usuario.rol == "gerente" else usuario.gerente_id
+
+
+def obtener_gerente_id(usuario: UsuarioActual) -> uuid.UUID:
+    gerente_id = gerente_de(usuario)
+    if gerente_id is None:
         raise ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
-    return usuario.gerente_id
+    return gerente_id
 
 
 GerenteId = Annotated[uuid.UUID, Depends(obtener_gerente_id)]
+
+LARGO_MAXIMO_DISPOSITIVO = 300
+
+
+@dataclass(frozen=True)
+class Origen:
+    """Desde dónde llega una solicitud: navegador o aplicación (User-Agent) e IP."""
+
+    dispositivo: str | None
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None
+
+
+def obtener_origen(request: Request) -> Origen:
+    """Lee el User-Agent y la IP del cliente. No usa X-Forwarded-For porque se puede falsificar:
+    detrás de un proxy, uvicorn debe arrancar con --proxy-headers."""
+    agente = request.headers.get("user-agent")
+    dispositivo = agente[:LARGO_MAXIMO_DISPOSITIVO] if agente else None
+    ip = None
+    if request.client is not None:
+        try:
+            ip = ipaddress.ip_address(request.client.host)
+        except ValueError:
+            # Un host que no es IP, como el "testclient" de las pruebas, no cabe en inet.
+            ip = None
+    return Origen(dispositivo=dispositivo, ip=ip)
+
+
+OrigenSolicitud = Annotated[Origen, Depends(obtener_origen)]
 
 
 class DeGerente(Protocol):
