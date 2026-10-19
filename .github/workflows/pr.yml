@@ -26,9 +26,9 @@ jobs:
       lockfiles: ${{ steps.filtro.outputs.lockfiles }}
       github: ${{ steps.filtro.outputs.github }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: filtro
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             client:
@@ -52,7 +52,7 @@ jobs:
       errores: ${{ steps.revisar.outputs.errores }}
     steps:
       - id: revisar
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -127,11 +127,11 @@ jobs:
     name: Mensajes de commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -142,7 +142,7 @@ jobs:
     name: Seguridad
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Claves y secretos
@@ -168,16 +168,16 @@ jobs:
       matrix:
         lenguaje: [javascript-typescript, python]
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@v6
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.lenguaje }}
           build-mode: none
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: ${{ matrix.lenguaje }}
       - name: Alertas abiertas
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -193,7 +193,7 @@ jobs:
     if: needs.cambios.outputs.lockfiles == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
@@ -205,7 +205,7 @@ jobs:
     if: needs.cambios.outputs.github == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:latest -color
 
   client:
@@ -217,11 +217,11 @@ jobs:
       run:
         working-directory: client
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -298,10 +298,10 @@ jobs:
       STORAGE_BACKEND: local
       UPLOADS_DIR: /tmp/uploads
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Dependencias sincronizadas
@@ -369,7 +369,7 @@ jobs:
       aprobada: ${{ steps.resumen.outputs.aprobada }}
     steps:
       - id: resumen
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           ERRORES: ${{ needs.estructura.outputs.errores }}
           R_ESTRUCTURA: ${{ needs.estructura.result }}
@@ -430,7 +430,7 @@ jobs:
     if: ${{ !cancelled() && needs.reporte.outputs.aprobada == 'true' && github.event.pull_request.base.ref == 'dev' && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
           script: |

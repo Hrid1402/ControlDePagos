@@ -13,11 +13,11 @@ jobs:
   auditoria:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: dev
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -25,13 +25,13 @@ jobs:
       - id: pnpm
         continue-on-error: true
         run: pnpm audit --prod --audit-level high
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - id: python
         continue-on-error: true
         working-directory: server
         run: uv sync --frozen && uv run pip-audit
       - if: steps.pnpm.outcome == 'failure' || steps.python.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { owner, repo } = context.repo;
