@@ -1,0 +1,373 @@
+name: Revisión de PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+    branches: [dev, main]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  cambios:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      client: ${{ steps.filtro.outputs.client }}
+      server: ${{ steps.filtro.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filtro
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            client:
+              - 'client/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+            server:
+              - 'server/**'
+
+  estructura:
+    name: Estructura de la PR
+    runs-on: ubuntu-latest
+    outputs:
+      errores: ${{ steps.revisar.outputs.errores }}
+    steps:
+      - id: revisar
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const errores = [];
+            const rama = pr.head.ref;
+            const destino = pr.base.ref;
+
+            const ramaTarea = rama.match(/^(feature|fix)\/(TASK-\d+)-[a-z0-9-]+$/);
+            const ramaSinTarea = /^(chore|ci|docs)\/[a-z0-9-]+$/.test(rama);
+            if (destino === 'main' && rama !== 'dev') errores.push('Solo se puede abrir una PR hacia main desde dev.');
+            if (destino === 'dev' && !ramaTarea && !ramaSinTarea) errores.push(`La rama "${rama}" no sigue la convención: feature/TASK-n-descripcion, fix/TASK-n-descripcion o chore/descripcion.`);
+            const tarea = ramaTarea ? ramaTarea[2] : null;
+
+            const titulo = pr.title.trim();
+            const reTitulo = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)\((client|server|repo|ci|deps|docs)\): [a-z0-9].{9,}$/;
+            if (!reTitulo.test(titulo)) errores.push('El título debe seguir el formato tipo(ámbito): asunto, en minúscula y con al menos 10 caracteres.');
+            if (titulo.length > 72) errores.push(`El título tiene ${titulo.length} caracteres; el máximo es 72.`);
+            if (tarea && !titulo.endsWith(` ${tarea}`)) errores.push(`El título debe terminar con la tarea de la rama: ${tarea}.`);
+
+            const limpio = (pr.body || '').replace(/<!--[\s\S]*?-->/g, '');
+            const secciones = {};
+            limpio.split(/^## /m).slice(1).forEach(b => {
+              const i = b.indexOf('\n');
+              secciones[(i < 0 ? b : b.slice(0, i)).trim()] = i < 0 ? '' : b.slice(i + 1).trim();
+            });
+            for (const s of ['Tarea', 'Qué se hizo', 'Criterios verificados', 'Cómo probarlo']) {
+              if (!(s in secciones)) { errores.push(`Falta la sección "${s}" de la plantilla.`); continue; }
+              if (!secciones[s].replace(/^\s*-\s*$/gm, '').trim()) errores.push(`La sección "${s}" está vacía.`);
+            }
+            if (tarea && !new RegExp(`(Closes|Refs) ${tarea}\\b`).test(secciones['Tarea'] || '')) errores.push(`La sección "Tarea" debe decir Closes ${tarea} o Refs ${tarea}.`);
+            const criterios = secciones['Criterios verificados'] || '';
+            if (/- \[ \]/.test(criterios)) errores.push('Hay criterios sin marcar en "Criterios verificados".');
+            if (tarea && !/- \[x\]/i.test(criterios)) errores.push('Marca al menos un criterio verificado.');
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number, per_page: 100 });
+            const propios = commits.filter(c => c.parents.length < 2);
+            if (propios.length < 3) errores.push(`La PR tiene ${propios.length} commit(s); se necesitan al menos 3.`);
+            const firmaIA = /co-authored-by:.*(claude|copilot|chatgpt|codex|cursor|gemini|anthropic|openai)|generated (with|by) .*(claude|copilot|chatgpt|codex|cursor|gemini)/i;
+            for (const c of commits) if (firmaIA.test(c.commit.message)) errores.push(`El commit ${c.sha.slice(0, 7)} tiene una firma o coautoría de IA.`);
+
+            const archivos = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: pr.number, per_page: 100 });
+            const contables = archivos.filter(a => !['pnpm-lock.yaml', 'server/uv.lock'].includes(a.filename));
+            if (contables.length > 20) errores.push(`La PR modifica ${contables.length} archivos; el máximo es 20.`);
+
+            const rutasIA = /(^|\/)(CLAUDE\.md|AGENTS\.md|\.claude\/|\.cursor\/|\.codex\/)/;
+            const esPrueba = /(^|\/)(tests?|__tests__)\/|\.(spec|test)\.[jt]s$/;
+            const mock = /\b(mocks?|fake|dummy|faker|lorem)\b/i;
+            const depuracion = /\b(console\.(log|debug)|debugger)\b/;
+            for (const a of archivos) {
+              if (rutasIA.test(a.filename)) errores.push(`No se permite el archivo ${a.filename}.`);
+              if (/(^|\/)\.env($|\.)/.test(a.filename) && !a.filename.endsWith('.env.example')) errores.push(`No se permite subir ${a.filename}.`);
+              if (a.filename.startsWith('.github/')) continue;
+              const agregadas = (a.patch || '').split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+              if (!esPrueba.test(a.filename) && mock.test(agregadas)) errores.push(`${a.filename} contiene datos mock; solo se permiten en pruebas.`);
+              if (/\.(ts|vue|js)$/.test(a.filename) && depuracion.test(agregadas)) errores.push(`${a.filename} tiene console.log o debugger.`);
+            }
+
+            const comparacion = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${pr.head.sha}...${destino}` });
+            if (comparacion.data.ahead_by > 0) errores.push(`La rama está desactualizada: ${destino} tiene ${comparacion.data.ahead_by} commit(s) nuevos. Ejecuta git merge origin/${destino} y vuelve a hacer push.`);
+            let datos = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+            if (datos.mergeable === null) {
+              await new Promise(r => setTimeout(r, 5000));
+              datos = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+            }
+            if (datos.mergeable === false) errores.push(`La rama tiene conflictos con ${destino}.`);
+
+            core.setOutput('errores', JSON.stringify(errores));
+            if (errores.length) core.setFailed(`${errores.length} problema(s) en la estructura de la PR.`);
+
+  commits:
+    name: Mensajes de commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  seguridad:
+    name: Seguridad
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Claves y secretos
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Archivos .env y archivos pesados
+        run: |
+          base=${{ github.event.pull_request.base.sha }}
+          head=${{ github.event.pull_request.head.sha }}
+          envs=$(git log --name-only --format= "$base..$head" | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' | sort -u || true)
+          if [ -n "$envs" ]; then echo "Archivos .env en el historial:"; echo "$envs"; exit 1; fi
+          pesados=$(git diff --name-only --diff-filter=AM "$base...$head" | while read -r f; do [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1048576 ] && echo "$f"; done || true)
+          if [ -n "$pesados" ]; then echo "Archivos de más de 1 MB:"; echo "$pesados"; exit 1; fi
+
+  client:
+    name: Client
+    needs: cambios
+    if: needs.cambios.outputs.client == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Dependencias sincronizadas
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm exec eslint . --max-warnings 0
+      - name: Formato
+        run: pnpm exec prettier --check src
+      - name: Tipos
+        run: pnpm run type-check
+      - name: Pruebas y cobertura
+        run: pnpm exec vitest run --coverage --coverage.thresholds.lines=70 --passWithNoTests
+      - name: Build
+        run: pnpm run build-only
+      - name: Dependencias nuevas sin usar
+        run: |
+          git show ${{ github.event.pull_request.base.sha }}:client/package.json > /tmp/base.json 2>/dev/null || echo '{}' > /tmp/base.json
+          pnpm exec knip --dependencies --reporter json > /tmp/knip.json || true
+          node -e '
+            const fs = require("fs");
+            const todas = o => ({ ...(o.dependencies || {}), ...(o.devDependencies || {}) });
+            const base = todas(JSON.parse(fs.readFileSync("/tmp/base.json")));
+            const nuevas = Object.keys(todas(JSON.parse(fs.readFileSync("package.json")))).filter(d => !(d in base));
+            let sinUso = [];
+            try {
+              const k = JSON.parse(fs.readFileSync("/tmp/knip.json"));
+              sinUso = (k.issues || []).flatMap(i => [...(i.dependencies || []), ...(i.devDependencies || [])].map(d => d.name));
+            } catch {}
+            const malas = nuevas.filter(d => sinUso.includes(d));
+            if (malas.length) { console.log("Dependencias nuevas sin usar: " + malas.join(", ")); process.exit(1); }
+          '
+      - name: Vulnerabilidades
+        run: pnpm audit --prod --audit-level high
+
+  server:
+    name: Server
+    needs: cambios
+    if: needs.cambios.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_pagos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/control_pagos_test
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/control_pagos_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      STORAGE_BACKEND: local
+      UPLOADS_DIR: /tmp/uploads
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Dependencias sincronizadas
+        run: uv lock --check && uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
+      - name: Formato
+        run: uv run ruff format --check .
+      - name: Tipos
+        run: uv run mypy app
+      - name: Migraciones
+        run: |
+          if [ -f alembic.ini ]; then
+            uv run alembic upgrade head
+            uv run alembic check
+          else
+            echo "Sin migraciones todavía."
+          fi
+      - name: Pruebas y cobertura
+        run: |
+          if find tests -name "test_*.py" | grep -q .; then
+            uv run pytest --cov=app --cov-fail-under=70
+          else
+            echo "Sin pruebas todavía."
+          fi
+      - name: Arranque
+        run: |
+          if [ -f app/main.py ]; then
+            uv run uvicorn app.main:app --port 8000 &
+            for i in $(seq 1 20); do curl -sf http://localhost:8000/health && exit 0; sleep 1; done
+            echo "El server no respondió en /health"
+            exit 1
+          else
+            echo "Sin app todavía."
+          fi
+      - name: Dependencias nuevas sin usar
+        run: |
+          git show ${{ github.event.pull_request.base.sha }}:server/pyproject.toml > /tmp/base.toml 2>/dev/null || touch /tmp/base.toml
+          uv run deptry . --json-output /tmp/deptry.json || true
+          uv run python - <<'PY'
+          import json, pathlib, re, sys, tomllib
+          def deps(texto):
+              if not texto.strip():
+                  return set()
+              lista = tomllib.loads(texto).get("project", {}).get("dependencies", [])
+              return {re.split(r"[\[<>=!~ ;]", d, maxsplit=1)[0].lower().replace("_", "-") for d in lista}
+          nuevas = deps(pathlib.Path("pyproject.toml").read_text()) - deps(pathlib.Path("/tmp/base.toml").read_text())
+          ruta = pathlib.Path("/tmp/deptry.json")
+          reporte = json.loads(ruta.read_text()) if ruta.exists() and ruta.read_text().strip() else []
+          sin_uso = {i["module"].lower().replace("_", "-") for i in reporte if i["error"]["code"] == "DEP002"}
+          malas = sorted(nuevas & sin_uso)
+          if malas:
+              print("Dependencias nuevas sin usar:", ", ".join(malas))
+              sys.exit(1)
+          PY
+      - name: Vulnerabilidades
+        run: uv run pip-audit
+
+  reporte:
+    name: Reporte
+    needs: [cambios, estructura, commits, seguridad, client, server]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      aprobada: ${{ steps.resumen.outputs.aprobada }}
+    steps:
+      - id: resumen
+        uses: actions/github-script@v7
+        env:
+          ERRORES: ${{ needs.estructura.outputs.errores }}
+          R_ESTRUCTURA: ${{ needs.estructura.result }}
+          R_COMMITS: ${{ needs.commits.result }}
+          R_SEGURIDAD: ${{ needs.seguridad.result }}
+          R_CLIENT: ${{ needs.client.result }}
+          R_SERVER: ${{ needs.server.result }}
+          C_CLIENT: ${{ needs.cambios.outputs.client }}
+          C_SERVER: ${{ needs.cambios.outputs.server }}
+        with:
+          github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const resultados = {
+              'Estructura de la PR': process.env.R_ESTRUCTURA,
+              'Mensajes de commit': process.env.R_COMMITS,
+              'Seguridad': process.env.R_SEGURIDAD,
+              'Client': process.env.R_CLIENT,
+              'Server': process.env.R_SERVER,
+            };
+            const texto = r => ({ success: 'Aprobado', skipped: 'Sin cambios', failure: 'Rechazado', cancelled: 'Cancelado' }[r] || r);
+            const aprobada = !Object.values(resultados).some(r => r === 'failure' || r === 'cancelled');
+            let errores = [];
+            try { errores = JSON.parse(process.env.ERRORES || '[]'); } catch {}
+            const enlace = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            let cuerpo = `<!-- revision-automatica -->\n## Revisión automática: ${aprobada ? 'aprobada' : 'rechazada'}\n\n| Control | Resultado |\n|---|---|\n`;
+            cuerpo += Object.entries(resultados).map(([k, r]) => `| ${k} | ${texto(r)} |`).join('\n');
+            if (errores.length) cuerpo += '\n\n### Motivos\n' + errores.map(e => `- ${e}`).join('\n');
+            cuerpo += aprobada
+              ? '\n\nTodos los controles pasaron. La PR se fusiona automáticamente.'
+              : `\n\nRevisa el detalle de cada control en [la ejecución](${enlace}), corrige y vuelve a hacer push.`;
+
+            const comentarios = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr.number });
+            const previo = comentarios.find(c => c.body.includes('<!-- revision-automatica -->'));
+            if (previo) await github.rest.issues.updateComment({ owner, repo, comment_id: previo.id, body: cuerpo });
+            else await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: cuerpo });
+
+            const etiquetas = [aprobada ? 'aprobada' : 'rechazada'];
+            if (process.env.C_CLIENT === 'true') etiquetas.push('client');
+            if (process.env.C_SERVER === 'true') etiquetas.push('server');
+            try { await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: aprobada ? 'rechazada' : 'aprobada' }); } catch {}
+            await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: etiquetas });
+
+            core.setOutput('aprobada', String(aprobada));
+            if (!aprobada) core.setFailed('La PR fue rechazada.');
+
+  merge:
+    name: Merge automático
+    needs: reporte
+    if: needs.reporte.outputs.aprobada == 'true' && github.event.pull_request.base.ref == 'dev' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            await github.rest.pulls.merge({ owner, repo, pull_number: pr.number, merge_method: 'merge', sha: pr.head.sha });
+            await github.rest.git.deleteRef({ owner, repo, ref: `heads/${pr.head.ref}` });

@@ -1,0 +1,43 @@
+name: Auditoría semanal
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  auditoria:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: pnpm
+        continue-on-error: true
+        run: pnpm audit --prod --audit-level high
+      - uses: astral-sh/setup-uv@v6
+      - id: python
+        continue-on-error: true
+        working-directory: server
+        run: uv sync --frozen && uv run pip-audit
+      - if: steps.pnpm.outcome == 'failure' || steps.python.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.issues.create({
+              owner, repo,
+              title: 'Vulnerabilidades en las dependencias de dev',
+              body: `La auditoría semanal encontró vulnerabilidades. Detalle: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+              labels: ['seguridad'],
+            });
