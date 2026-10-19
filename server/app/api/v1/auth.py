@@ -1,4 +1,5 @@
-"""Acceso (H01): login con bloqueo por intentos y estado de cuenta, y renovación de la sesión.
+"""Acceso (H01): login con bloqueo por intentos y estado de cuenta, renovación de la sesión y
+usuario de la sesión.
 
 Errores del login: 401 CREDENCIALES_INVALIDAS (genérico), 423 CUENTA_BLOQUEADA con los minutos
 restantes en detail y 403 CUENTA_INACTIVA.
@@ -36,3 +37,10 @@ def renovar(usuario: UsuarioActual) -> SesionSalida:
     continuar o con actividad cerca del vencimiento. Un token vencido, revocado o de una cuenta
     inactiva responde 401 y lleva al login."""
     return sesion_de(usuario)
+
+
+@router.get("/me")
+def yo(usuario: UsuarioActual) -> UsuarioSesion:
+    """Usuario de la sesión. El cliente lo pide al recargar para confirmar que el token guardado
+    sigue siendo válido."""
+    return usuario_sesion(usuario)

@@ -435,3 +435,37 @@ def test_renovar_con_cuenta_desactivada_responde_cuenta_inactiva(
     r = cliente.post(RENOVAR, headers=bearer(token))
     assert r.status_code == 401
     assert r.json()["code"] == "CUENTA_INACTIVA"
+
+
+# Usuario de la sesión
+
+
+ME = "/api/v1/auth/me"
+
+
+@pytest.mark.parametrize("rol", ["gerente", "asistente"])
+def test_me_devuelve_el_usuario_de_la_sesion(
+    cliente: TestClient, dos_gerentes: DosGerentes, rol: str
+) -> None:
+    usuario = getattr(dos_gerentes.dos, rol)
+    r = cliente.get(ME, headers=bearer(crear_token(usuario)))
+    assert r.status_code == 200
+    assert r.json() == {"id": str(usuario.id), "nombre": usuario.username, "rol": rol}
+
+
+def test_me_sin_token_responde_no_autenticado(cliente: TestClient) -> None:
+    r = cliente.get(ME)
+    assert r.status_code == 401
+    assert r.json()["code"] == "NO_AUTENTICADO"
+
+
+def test_me_con_sesion_revocada_responde_sesion_revocada(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    token = crear_token(gerente)
+    gerente.token_version += 1
+    db.flush()
+    r = cliente.get(ME, headers=bearer(token))
+    assert r.status_code == 401
+    assert r.json()["code"] == "SESION_REVOCADA"
