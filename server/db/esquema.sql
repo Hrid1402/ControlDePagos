@@ -724,3 +724,322 @@ CREATE UNIQUE INDEX uq_solicitud_aprobacion_pendiente ON solicitud_aprobacion (d
   WHERE estado = 'pendiente';
 CREATE TRIGGER tg_solicitud_aprobacion_actualizado_en BEFORE UPDATE ON solicitud_aprobacion
   FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+-- Comprobantes y recibos
+
+CREATE TABLE comprobante (
+  id uuid DEFAULT uuid_generate_v7(),
+  gerente_id uuid NOT NULL,
+  archivo_url text NOT NULL,
+  archivo_tipo text NOT NULL,
+  archivo_bytes integer NOT NULL,
+  hash_sha256 text NOT NULL,
+  entidad text,
+  numero_operacion text,
+  monto numeric(12,2),
+  moneda text NOT NULL DEFAULT 'PEN',
+  fecha_pago timestamptz,
+  texto_ocr text,
+  confianza numeric(4,3),
+  datos_extraidos jsonb NOT NULL DEFAULT '{}'::jsonb,
+  estado text NOT NULL DEFAULT 'procesando',
+  motivo_codigo text,
+  deuda_sugerida_id uuid,
+  fondos text NOT NULL DEFAULT 'gerente',
+  reemplaza_a_id uuid,
+  subido_por uuid NOT NULL,
+  revisado_por uuid,
+  revisado_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_comprobante PRIMARY KEY (id),
+  CONSTRAINT fk_comprobante_gerente_id_usuario FOREIGN KEY (gerente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_comprobante_deuda_sugerida_id_deuda FOREIGN KEY (deuda_sugerida_id)
+    REFERENCES deuda (id) ON DELETE SET NULL,
+  CONSTRAINT fk_comprobante_reemplaza_a_id_comprobante FOREIGN KEY (reemplaza_a_id)
+    REFERENCES comprobante (id),
+  CONSTRAINT fk_comprobante_subido_por_usuario FOREIGN KEY (subido_por) REFERENCES usuario (id),
+  CONSTRAINT fk_comprobante_revisado_por_usuario FOREIGN KEY (revisado_por)
+    REFERENCES usuario (id),
+  CONSTRAINT ck_comprobante_archivo_tipo CHECK (archivo_tipo IN ('jpg', 'png', 'pdf')),
+  CONSTRAINT ck_comprobante_archivo_bytes CHECK (archivo_bytes BETWEEN 1 AND 10485760),
+  CONSTRAINT ck_comprobante_hash_sha256 CHECK (hash_sha256 ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT ck_comprobante_entidad CHECK (
+    entidad IN (
+      'bcp', 'interbank', 'bbva', 'scotiabank', 'yape', 'plin', 'agente_bcp', 'kasnet', 'otra'
+    )
+  ),
+  CONSTRAINT ck_comprobante_monto CHECK (monto > 0),
+  CONSTRAINT ck_comprobante_moneda CHECK (moneda IN ('PEN', 'USD')),
+  CONSTRAINT ck_comprobante_confianza CHECK (confianza BETWEEN 0 AND 1),
+  CONSTRAINT ck_comprobante_estado CHECK (
+    estado IN ('procesando', 'validado', 'por_confirmar', 'en_revision', 'rechazado')
+  ),
+  CONSTRAINT ck_comprobante_motivo_codigo CHECK (
+    motivo_codigo IN (
+      'duplicado', 'ilegible', 'otra_deuda', 'monto_menor', 'monto_mayor', 'fecha_dudosa',
+      'baja_confianza'
+    )
+  ),
+  CONSTRAINT ck_comprobante_fondos CHECK (fondos IN ('gerente', 'caja_chica', 'dinero_propio'))
+);
+CREATE INDEX ix_comprobante_gerente_id_estado ON comprobante (gerente_id, estado);
+CREATE INDEX ix_comprobante_deuda_sugerida_id ON comprobante (deuda_sugerida_id);
+CREATE INDEX ix_comprobante_reemplaza_a_id ON comprobante (reemplaza_a_id);
+CREATE INDEX ix_comprobante_subido_por ON comprobante (subido_por);
+CREATE INDEX ix_comprobante_revisado_por ON comprobante (revisado_por);
+CREATE UNIQUE INDEX uq_comprobante_hash ON comprobante (hash_sha256)
+  WHERE estado <> 'rechazado';
+CREATE UNIQUE INDEX uq_comprobante_operacion ON comprobante (entidad, numero_operacion)
+  WHERE numero_operacion IS NOT NULL AND estado <> 'rechazado';
+CREATE TRIGGER tg_comprobante_actualizado_en BEFORE UPDATE ON comprobante
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+CREATE TABLE comprobante_deuda (
+  comprobante_id uuid NOT NULL,
+  deuda_id uuid NOT NULL,
+  monto_aplicado numeric(12,2) NOT NULL,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_comprobante_deuda PRIMARY KEY (comprobante_id, deuda_id),
+  CONSTRAINT fk_comprobante_deuda_comprobante_id_comprobante FOREIGN KEY (comprobante_id)
+    REFERENCES comprobante (id) ON DELETE CASCADE,
+  CONSTRAINT fk_comprobante_deuda_deuda_id_deuda FOREIGN KEY (deuda_id) REFERENCES deuda (id),
+  CONSTRAINT ck_comprobante_deuda_monto_aplicado CHECK (monto_aplicado > 0)
+);
+CREATE INDEX ix_comprobante_deuda_deuda_id ON comprobante_deuda (deuda_id);
+
+CREATE TABLE recibo (
+  id uuid DEFAULT uuid_generate_v7(),
+  gerente_id uuid NOT NULL,
+  archivo_url text NOT NULL,
+  archivo_tipo text NOT NULL,
+  hash_sha256 text NOT NULL,
+  pagina smallint NOT NULL DEFAULT 1,
+  origen text NOT NULL,
+  estado text NOT NULL DEFAULT 'procesando',
+  proveedor_ia text,
+  datos_extraidos jsonb NOT NULL DEFAULT '{}'::jsonb,
+  propuesta text,
+  decision text,
+  servicio_id uuid,
+  deuda_id uuid,
+  subido_por uuid,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_recibo PRIMARY KEY (id),
+  CONSTRAINT fk_recibo_gerente_id_usuario FOREIGN KEY (gerente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_recibo_servicio_id_servicio FOREIGN KEY (servicio_id)
+    REFERENCES servicio (id) ON DELETE SET NULL,
+  CONSTRAINT fk_recibo_deuda_id_deuda FOREIGN KEY (deuda_id)
+    REFERENCES deuda (id) ON DELETE SET NULL,
+  CONSTRAINT fk_recibo_subido_por_usuario FOREIGN KEY (subido_por) REFERENCES usuario (id),
+  CONSTRAINT uq_recibo_gerente_id_hash_sha256_pagina UNIQUE (gerente_id, hash_sha256, pagina),
+  CONSTRAINT ck_recibo_archivo_tipo CHECK (archivo_tipo IN ('jpg', 'png', 'pdf', 'heic')),
+  CONSTRAINT ck_recibo_hash_sha256 CHECK (hash_sha256 ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT ck_recibo_pagina CHECK (pagina > 0),
+  CONSTRAINT ck_recibo_origen CHECK (origen IN ('subida', 'correo', 'robot')),
+  CONSTRAINT ck_recibo_estado CHECK (
+    estado IN ('procesando', 'listo', 'error', 'pendiente_lectura')
+  ),
+  CONSTRAINT ck_recibo_propuesta CHECK (
+    propuesta IN ('agregar_pagar', 'solo_agregar', 'crear_servicio', 'ignorar')
+  ),
+  CONSTRAINT ck_recibo_decision CHECK (decision IN ('aceptada', 'ignorada'))
+);
+CREATE INDEX ix_recibo_servicio_id ON recibo (servicio_id);
+CREATE INDEX ix_recibo_deuda_id ON recibo (deuda_id);
+CREATE INDEX ix_recibo_subido_por ON recibo (subido_por);
+CREATE TRIGGER tg_recibo_actualizado_en BEFORE UPDATE ON recibo
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+CREATE TABLE carga_qr (
+  id uuid DEFAULT uuid_generate_v7(),
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL,
+  deuda_id uuid,
+  token_hash text NOT NULL,
+  expira_en timestamptz NOT NULL,
+  usado_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_carga_qr PRIMARY KEY (id),
+  CONSTRAINT fk_carga_qr_usuario_id_usuario FOREIGN KEY (usuario_id)
+    REFERENCES usuario (id) ON DELETE CASCADE,
+  CONSTRAINT fk_carga_qr_deuda_id_deuda FOREIGN KEY (deuda_id)
+    REFERENCES deuda (id) ON DELETE CASCADE,
+  CONSTRAINT uq_carga_qr_token_hash UNIQUE (token_hash),
+  CONSTRAINT ck_carga_qr_tipo CHECK (tipo IN ('comprobante', 'recibo'))
+);
+CREATE INDEX ix_carga_qr_usuario_id ON carga_qr (usuario_id);
+CREATE INDEX ix_carga_qr_deuda_id ON carga_qr (deuda_id);
+
+CREATE TABLE conciliacion (
+  id uuid DEFAULT uuid_generate_v7(),
+  gerente_id uuid NOT NULL,
+  medio_pago_id uuid NOT NULL,
+  archivo_url text NOT NULL,
+  hash_sha256 text NOT NULL,
+  periodo date NOT NULL,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_conciliacion PRIMARY KEY (id),
+  CONSTRAINT fk_conciliacion_gerente_id_usuario FOREIGN KEY (gerente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_conciliacion_medio_pago_id_medio_pago FOREIGN KEY (medio_pago_id)
+    REFERENCES medio_pago (id),
+  CONSTRAINT uq_conciliacion_gerente_id_hash_sha256 UNIQUE (gerente_id, hash_sha256),
+  CONSTRAINT ck_conciliacion_periodo CHECK (extract(day FROM periodo) = 1)
+);
+CREATE INDEX ix_conciliacion_medio_pago_id ON conciliacion (medio_pago_id);
+
+CREATE TABLE movimiento_conciliacion (
+  id uuid DEFAULT uuid_generate_v7(),
+  conciliacion_id uuid NOT NULL,
+  fecha date NOT NULL,
+  descripcion text NOT NULL,
+  monto numeric(12,2) NOT NULL,
+  deuda_id uuid,
+  estado text NOT NULL DEFAULT 'sin_deuda',
+  manual boolean NOT NULL DEFAULT false,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_movimiento_conciliacion PRIMARY KEY (id),
+  CONSTRAINT fk_movimiento_conciliacion_conciliacion_id_conciliacion FOREIGN KEY (conciliacion_id)
+    REFERENCES conciliacion (id) ON DELETE CASCADE,
+  CONSTRAINT fk_movimiento_conciliacion_deuda_id_deuda FOREIGN KEY (deuda_id)
+    REFERENCES deuda (id) ON DELETE SET NULL,
+  CONSTRAINT ck_movimiento_conciliacion_estado CHECK (estado IN ('conciliado', 'sin_deuda')),
+  CONSTRAINT ck_movimiento_conciliacion_monto CHECK (monto <> 0)
+);
+CREATE INDEX ix_movimiento_conciliacion_conciliacion_id ON movimiento_conciliacion (conciliacion_id);
+CREATE INDEX ix_movimiento_conciliacion_deuda_id ON movimiento_conciliacion (deuda_id);
+CREATE TRIGGER tg_movimiento_conciliacion_actualizado_en BEFORE UPDATE ON movimiento_conciliacion
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+CREATE TABLE reembolso (
+  id uuid DEFAULT uuid_generate_v7(),
+  gerente_id uuid NOT NULL,
+  asistente_id uuid NOT NULL,
+  comprobante_id uuid NOT NULL,
+  monto numeric(12,2) NOT NULL,
+  estado text NOT NULL DEFAULT 'pendiente',
+  motivo text,
+  medio_reembolso text,
+  resuelto_por uuid,
+  reembolsado_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_reembolso PRIMARY KEY (id),
+  CONSTRAINT fk_reembolso_gerente_id_usuario FOREIGN KEY (gerente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_reembolso_asistente_id_usuario FOREIGN KEY (asistente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_reembolso_comprobante_id_comprobante FOREIGN KEY (comprobante_id)
+    REFERENCES comprobante (id),
+  CONSTRAINT fk_reembolso_resuelto_por_usuario FOREIGN KEY (resuelto_por) REFERENCES usuario (id),
+  CONSTRAINT uq_reembolso_comprobante_id UNIQUE (comprobante_id),
+  CONSTRAINT ck_reembolso_monto CHECK (monto > 0),
+  CONSTRAINT ck_reembolso_estado CHECK (
+    estado IN ('pendiente', 'aprobado', 'rechazado', 'reembolsado')
+  )
+);
+CREATE INDEX ix_reembolso_gerente_id ON reembolso (gerente_id);
+CREATE INDEX ix_reembolso_asistente_id ON reembolso (asistente_id);
+CREATE INDEX ix_reembolso_resuelto_por ON reembolso (resuelto_por);
+CREATE TRIGGER tg_reembolso_actualizado_en BEFORE UPDATE ON reembolso
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+-- Seguimiento y robots
+
+CREATE TABLE notificacion (
+  id uuid DEFAULT uuid_generate_v7(),
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL,
+  titulo text NOT NULL,
+  mensaje text NOT NULL,
+  deuda_id uuid,
+  urgente boolean NOT NULL DEFAULT false,
+  leida_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_notificacion PRIMARY KEY (id),
+  CONSTRAINT fk_notificacion_usuario_id_usuario FOREIGN KEY (usuario_id)
+    REFERENCES usuario (id) ON DELETE CASCADE,
+  CONSTRAINT fk_notificacion_deuda_id_deuda FOREIGN KEY (deuda_id)
+    REFERENCES deuda (id) ON DELETE CASCADE,
+  CONSTRAINT ck_notificacion_tipo CHECK (
+    tipo IN (
+      'deuda_creada', 'deuda_pagada', 'por_vencer', 'vencida', 'comprobante_rechazado',
+      'comprobante_en_revision', 'aprobacion_pendiente', 'orden_urgente', 'no_pude_pagar',
+      'recordatorio_comprobante', 'comentario', 'robot_falla', 'reembolso'
+    )
+  )
+);
+CREATE INDEX ix_notificacion_usuario_id_creado_en ON notificacion (usuario_id, creado_en);
+CREATE INDEX ix_notificacion_deuda_id ON notificacion (deuda_id);
+
+CREATE TABLE preferencia_notificacion (
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL,
+  canal text NOT NULL,
+  activa boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_preferencia_notificacion PRIMARY KEY (usuario_id, tipo, canal),
+  CONSTRAINT fk_preferencia_notificacion_usuario_id_usuario FOREIGN KEY (usuario_id)
+    REFERENCES usuario (id) ON DELETE CASCADE,
+  CONSTRAINT ck_preferencia_notificacion_tipo CHECK (
+    tipo IN (
+      'deuda_creada', 'deuda_pagada', 'por_vencer', 'vencida', 'comprobante_rechazado',
+      'comprobante_en_revision', 'aprobacion_pendiente', 'orden_urgente', 'no_pude_pagar',
+      'recordatorio_comprobante', 'comentario', 'robot_falla', 'reembolso'
+    )
+  ),
+  CONSTRAINT ck_preferencia_notificacion_canal CHECK (canal IN ('app', 'correo', 'whatsapp'))
+);
+CREATE TRIGGER tg_preferencia_notificacion_actualizado_en BEFORE UPDATE ON preferencia_notificacion
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+CREATE TABLE exportacion (
+  id uuid DEFAULT uuid_generate_v7(),
+  gerente_id uuid NOT NULL,
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL,
+  parametros jsonb NOT NULL DEFAULT '{}'::jsonb,
+  estado text NOT NULL DEFAULT 'procesando',
+  archivo_url text,
+  expira_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  actualizado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_exportacion PRIMARY KEY (id),
+  CONSTRAINT fk_exportacion_gerente_id_usuario FOREIGN KEY (gerente_id) REFERENCES usuario (id),
+  CONSTRAINT fk_exportacion_usuario_id_usuario FOREIGN KEY (usuario_id) REFERENCES usuario (id),
+  CONSTRAINT ck_exportacion_tipo CHECK (
+    tipo IN ('comprobantes_lote', 'reporte_mensual', 'auditoria')
+  ),
+  CONSTRAINT ck_exportacion_estado CHECK (estado IN ('procesando', 'lista', 'error'))
+);
+CREATE INDEX ix_exportacion_gerente_id ON exportacion (gerente_id);
+CREATE INDEX ix_exportacion_usuario_id ON exportacion (usuario_id);
+CREATE TRIGGER tg_exportacion_actualizado_en BEFORE UPDATE ON exportacion
+  FOR EACH ROW EXECUTE FUNCTION fijar_actualizado_en();
+
+CREATE TABLE ejecucion_robot (
+  id uuid DEFAULT uuid_generate_v7(),
+  empresa_id uuid NOT NULL,
+  servicio_id uuid,
+  deuda_id uuid,
+  tarea text NOT NULL,
+  estado text NOT NULL DEFAULT 'en_curso',
+  detalle text,
+  terminado_en timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_ejecucion_robot PRIMARY KEY (id),
+  CONSTRAINT fk_ejecucion_robot_empresa_id_empresa FOREIGN KEY (empresa_id)
+    REFERENCES empresa (id),
+  CONSTRAINT fk_ejecucion_robot_servicio_id_servicio FOREIGN KEY (servicio_id)
+    REFERENCES servicio (id) ON DELETE SET NULL,
+  CONSTRAINT fk_ejecucion_robot_deuda_id_deuda FOREIGN KEY (deuda_id)
+    REFERENCES deuda (id) ON DELETE SET NULL,
+  CONSTRAINT ck_ejecucion_robot_tarea CHECK (tarea IN ('consultar', 'pagar', 'confirmar')),
+  CONSTRAINT ck_ejecucion_robot_estado CHECK (
+    estado IN ('en_curso', 'exito', 'fallo', 'captcha', 'bloqueado')
+  )
+);
+CREATE INDEX ix_ejecucion_robot_empresa_id_creado_en ON ejecucion_robot (empresa_id, creado_en);
+CREATE INDEX ix_ejecucion_robot_servicio_id ON ejecucion_robot (servicio_id);
+CREATE INDEX ix_ejecucion_robot_deuda_id ON ejecucion_robot (deuda_id);
