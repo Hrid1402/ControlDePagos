@@ -9,6 +9,17 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_expires_minutes: int = 30
     timezone: str = "America/Lima"
+    cors_origins: list[str] = ["http://localhost:5173"]
+
+    smtp_host: str
+    smtp_port: int
+    smtp_from: str
+
+    s3_endpoint: str
+    s3_region: str
+    s3_bucket: str
+    s3_access_key: str
+    s3_secret_key: str
 
 
 settings = Settings()  # type: ignore[call-arg]
