@@ -94,23 +94,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v8
+        env:
+          CLIENT: ${{ needs.client.result }}
+          SERVER: ${{ needs.server.result }}
         with:
           github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
             const commit = context.payload.head_commit;
-            await github.rest.issues.create({
-              owner, repo,
-              title: `dev está roto desde el commit ${context.sha.slice(0, 7)}`,
-              body: [
-                `El último cambio en dev rompió la revisión de ${process.env.CLIENT === 'failure' ? 'client' : ''} ${process.env.SERVER === 'failure' ? 'server' : ''}.`,
-                '',
-                `- Commit: ${commit.message.split('\n')[0]}`,
-                `- Autor: ${commit.author.name}`,
-                `- Detalle: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
-              ].join('\n'),
-              labels: ['dev-roto'],
-            });
-        env:
-          CLIENT: ${{ needs.client.result }}
-          SERVER: ${{ needs.server.result }}
+            const partes = [];
+            if (process.env.CLIENT === 'failure') partes.push('client');
+            if (process.env.SERVER === 'failure') partes.push('server');
+            const detalle = [
+              `El cambio rompió la revisión de ${partes.join(' y ')}.`,
+              '',
+              `- Commit: ${context.sha.slice(0, 7)} ${commit.message.split('\n')[0]}`,
+              `- Autor: ${commit.author.name}`,
+              `- Detalle: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            const abiertos = await github.rest.issues.listForRepo({ owner, repo, labels: 'dev-roto', state: 'open' });
+            if (abiertos.data.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: abiertos.data[0].number, body: detalle });
+            } else {
+              await github.rest.issues.create({
+                owner, repo,
+                title: `dev está roto desde el commit ${context.sha.slice(0, 7)}`,
+                body: detalle,
+                labels: ['dev-roto'],
+              });
+            }
+
+  recuperado:
+    name: Recuperado
+    needs: [client, server]
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const abiertos = await github.rest.issues.listForRepo({ owner, repo, labels: 'dev-roto', state: 'open' });
+            for (const issue of abiertos.data) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: `dev volvió a pasar la revisión con el commit ${context.sha.slice(0, 7)}.`,
+              });
+              await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });
+            }
