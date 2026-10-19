@@ -398,7 +398,7 @@ def test_login_desconocido_va_al_registro_tecnico(
     assert "OtraClave123" not in registro_tecnico.text
 
 
-def test_login_desconocido_escapa_saltos_de_linea(
+def test_login_desconocido_quita_saltos_de_linea(
     cliente: TestClient, registro_tecnico: pytest.LogCaptureFixture
 ) -> None:
     cliente.post(
@@ -409,6 +409,10 @@ def test_login_desconocido_escapa_saltos_de_linea(
     mensaje = eventos_tecnicos(registro_tecnico)[0].getMessage()
     assert "\n" not in mensaje
     assert "\r" not in mensaje
+    # Se quitan, no solo se escapan: tampoco queda la forma \r\n que dejaría %r.
+    assert "\\r" not in mensaje
+    assert "\\n" not in mensaje
+    assert "'agentefalso: evento'" in mensaje
 
 
 # Lectura autorizada: solo el gerente y solo lo suyo

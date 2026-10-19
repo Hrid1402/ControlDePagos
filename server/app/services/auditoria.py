@@ -130,10 +130,14 @@ def registrar_login_desconocido(origen: Origen) -> None:
     """Ingreso con un usuario que no existe. No va a la tabla porque no hay gerente al que
     asignarlo; va al registro técnico. No recibe el nombre escrito: podría ser una contraseña
     escrita en el campo equivocado."""
+    dispositivo = origen.dispositivo
+    if dispositivo is not None:
+        # El User-Agent lo escribe el cliente: sin saltos de línea no puede fingir otra entrada.
+        dispositivo = dispositivo.replace("\r", "").replace("\n", "")
     logger.warning(
         "Ingreso fallido con una cuenta desconocida (ip=%s, dispositivo=%r)",
         origen.ip,
-        origen.dispositivo,
+        dispositivo,
         extra={"evento": "login_desconocido"},
     )
 
