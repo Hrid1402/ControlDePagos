@@ -1,7 +1,9 @@
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 import jwt
 
 from app.core.config import settings
@@ -10,6 +12,27 @@ from app.models import Usuario
 
 ALGORITMO = "HS256"
 CLAIMS_OBLIGATORIOS = ["sub", "rol", "token_version", "iat", "exp"]
+COSTO_BCRYPT = 12
+
+
+def hashear_contrasena(contrasena: str) -> str:
+    """Hash bcrypt de la contraseña. bcrypt rechaza más de 72 bytes: quien fija la contraseña
+    debe validar su largo antes."""
+    return bcrypt.hashpw(contrasena.encode(), bcrypt.gensalt(COSTO_BCRYPT)).decode()
+
+
+def verificar_contrasena(contrasena: str, password_hash: str) -> bool:
+    """Si la contraseña corresponde al hash. Una contraseña de más de 72 bytes o un hash que no
+    es bcrypt no coinciden: no son un error del servidor."""
+    try:
+        return bcrypt.checkpw(contrasena.encode(), password_hash.encode())
+    except ValueError:
+        return False
+
+
+# Hash con el mismo costo que los reales, calculado una vez al cargar el módulo. Verificar contra
+# él cuando el usuario no existe iguala el tiempo de respuesta al de una cuenta real.
+HASH_RELLENO = hashear_contrasena(secrets.token_urlsafe(32))
 
 
 @dataclass(frozen=True)
