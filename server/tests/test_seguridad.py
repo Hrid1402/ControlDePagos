@@ -20,7 +20,14 @@ from app.core.dependencias import (
     obtener_propio,
 )
 from app.core.errores import registrar_manejadores
-from app.core.seguridad import crear_token, leer_token
+from app.core.seguridad import (
+    COSTO_BCRYPT,
+    HASH_RELLENO,
+    crear_token,
+    hashear_contrasena,
+    leer_token,
+    verificar_contrasena,
+)
 from app.models import Categoria, Usuario
 from tests.conftest import DosGerentes
 
@@ -112,6 +119,36 @@ def test_el_token_lleva_usuario_rol_version_y_vencimiento(dos_gerentes: DosGeren
     assert claims["token_version"] == asistente.token_version
     assert claims["exp"] - claims["iat"] == settings.jwt_expires_minutes * 60
     assert leer_token(crear_token(asistente)).usuario_id == asistente.id
+
+
+# Contraseñas
+
+
+def test_la_contrasena_se_verifica_contra_su_hash() -> None:
+    password_hash = hashear_contrasena("Clave-segura-1")
+    assert password_hash != "Clave-segura-1"
+    assert verificar_contrasena("Clave-segura-1", password_hash)
+    assert not verificar_contrasena("clave-segura-1", password_hash)
+
+
+def test_cada_hash_lleva_su_propia_sal() -> None:
+    assert hashear_contrasena("Clave-segura-1") != hashear_contrasena("Clave-segura-1")
+
+
+def test_un_hash_que_no_es_bcrypt_no_coincide() -> None:
+    assert not verificar_contrasena("x", "x")
+
+
+def test_una_contrasena_de_mas_de_72_bytes_no_coincide() -> None:
+    password_hash = hashear_contrasena("a" * 72)
+    assert not verificar_contrasena("a" * 73, password_hash)
+
+
+def test_el_hash_de_relleno_usa_el_costo_de_los_reales() -> None:
+    costo = f"$2b${COSTO_BCRYPT:02d}$"
+    assert HASH_RELLENO.startswith(costo)
+    assert hashear_contrasena("Clave-segura-1").startswith(costo)
+    assert not verificar_contrasena("", HASH_RELLENO)
 
 
 # 401 NO_AUTENTICADO
