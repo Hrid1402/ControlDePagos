@@ -1,0 +1,21 @@
+MIN_COMMITS=2
+branch=$(git rev-parse --abbrev-ref HEAD)
+
+if [ "$branch" = "main" ] || [ "$branch" = "dev" ]; then
+  echo "No se permite push directo a $branch. Usa una rama y abre una PR."
+  exit 1
+fi
+
+if ! echo "$branch" | grep -Eq '^(feature|fix)/TASK-[0-9]+-[a-z0-9-]+$|^(chore|ci|docs)/[a-z0-9-]+$'; then
+  echo "Nombre de rama inválido: $branch"
+  echo "Usa feature/TASK-12-descripcion o chore/descripcion"
+  exit 1
+fi
+
+git fetch origin dev --quiet
+commits=$(git rev-list --count origin/dev..HEAD)
+
+if [ "$commits" -lt "$MIN_COMMITS" ]; then
+  echo "La rama tiene $commits commit(s) sobre dev. Se necesitan al menos $MIN_COMMITS."
+  exit 1
+fi
