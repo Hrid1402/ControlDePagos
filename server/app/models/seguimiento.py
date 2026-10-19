@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, text
+from sqlalchemy import ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,7 +11,10 @@ from app.models.base import Base, ConActualizado, ConCreado, ConId
 
 class Notificacion(ConId, ConCreado, Base):
     __tablename__ = "notificacion"
-    __table_args__ = (Index("ix_notificacion_usuario_id_creado_en", "usuario_id", "creado_en"),)
+    __table_args__ = (
+        Index("ix_notificacion_usuario_id_creado_en", "usuario_id", "creado_en"),
+        UniqueConstraint("usuario_id", "clave_evento"),
+    )
 
     usuario_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usuario.id", ondelete="CASCADE"))
     tipo: Mapped[str]
@@ -22,6 +25,7 @@ class Notificacion(ConId, ConCreado, Base):
     )
     urgente: Mapped[bool] = mapped_column(server_default=text("false"))
     leida_en: Mapped[datetime | None]
+    clave_evento: Mapped[str | None]
 
 
 class PreferenciaNotificacion(ConActualizado, Base):
