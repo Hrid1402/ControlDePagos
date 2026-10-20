@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     login_minutos_bloqueo: int = 15
     timezone: str = "America/Lima"
     cors_origins: list[str] = ["http://localhost:5173"]
+    url_cliente: str = "http://localhost:5173"
 
     smtp_host: str
     smtp_port: int

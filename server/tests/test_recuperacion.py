@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.seguridad import hashear_contrasena
 from app.main import app
@@ -70,13 +71,15 @@ def test_solicitar_recuperacion_por_usuario_crea_token_y_envia_un_correo(
     [token_db] = tokens(db)
     assert token_db.usuario_id == gerente.id
     assert token_db.usado_en is None
-    assert token_db.expira_en > datetime.now(UTC)
+    restante = token_db.expira_en - datetime.now(UTC)
+    assert timedelta(minutes=29) < restante <= timedelta(minutes=30)
     [(destinatario, _, cuerpo)] = correos
     assert destinatario == gerente.correo
-    assert any(
-        hashlib.sha256(linea.encode()).hexdigest() == token_db.token_hash
-        for linea in cuerpo.splitlines()
-    )
+    [enlace] = [linea for linea in cuerpo.splitlines() if linea.startswith("http")]
+    base, _, token = enlace.rpartition("/restablecer/")
+    assert base == settings.url_cliente.rstrip("/")
+    assert hashlib.sha256(token.encode()).hexdigest() == token_db.token_hash
+    assert "30 minutos" in cuerpo
 
 
 def test_solicitar_recuperacion_acepta_mayusculas_y_espacios(
@@ -358,3 +361,21 @@ def test_restablecer_no_permite_reutilizar_contrasena_actual_ni_ultimas_3(
 
     r3 = cliente.post(RESTABLECER, json={"token": token_3, "nueva_contrasena": clave_vieja_4})
     assert r3.status_code == 200
+
+
+def test_el_enlace_del_correo_restablece_la_contrasena(
+    cliente: TestClient, db: Session, equipos: DosGerentes, correos: list[tuple[str, str, str]]
+) -> None:
+    gerente = equipos.uno.gerente
+    cliente.post(SOLICITAR, json={"username": gerente.username})
+    [(_, _, cuerpo)] = correos
+    token = next(
+        linea.rpartition("/restablecer/")[2]
+        for linea in cuerpo.splitlines()
+        if "/restablecer/" in linea
+    )
+    r = cliente.post(RESTABLECER, json={"token": token, "nueva_contrasena": "Otra-clave-nueva-7"})
+    assert r.status_code == 200
+    r = cliente.post(RESTABLECER, json={"token": token, "nueva_contrasena": "Otra-clave-nueva-8"})
+    assert r.status_code == 400
+    assert r.json()["code"] == "TOKEN_INVALIDO"

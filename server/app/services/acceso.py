@@ -27,6 +27,9 @@ from app.services.contrasenas import actualizar_contrasena, es_reutilizada
 logger = logging.getLogger(__name__)
 
 
+VIGENCIA_RECUPERACION = timedelta(minutes=30)
+
+
 class Motivo(StrEnum):
     """Motivo de un login_fallido, guardado en el detalle de la auditoría."""
 
@@ -165,7 +168,7 @@ def solicitar_recuperacion(db: Session, username: str) -> CorreoRecuperacion | N
         TokenRestablecimiento(
             usuario_id=usuario.id,
             token_hash=hashlib.sha256(token_crudo.encode()).hexdigest(),
-            expira_en=datetime.now(UTC) + timedelta(hours=1),
+            expira_en=datetime.now(UTC) + VIGENCIA_RECUPERACION,
         )
     )
     db.commit()
@@ -175,11 +178,13 @@ def solicitar_recuperacion(db: Session, username: str) -> CorreoRecuperacion | N
 def enviar_recuperacion(correo: CorreoRecuperacion) -> None:
     """Envía el correo de recuperación. Un fallo se registra sin usuario ni correo y no cambia
     lo que ya respondió la solicitud."""
+    enlace = f"{settings.url_cliente.rstrip('/')}/restablecer/{correo.token}"
+    minutos = int(VIGENCIA_RECUPERACION.total_seconds() // 60)
     cuerpo = (
         f"Hola {correo.nombre},\n\n"
         f"Recibimos una solicitud para restablecer tu contraseña.\n"
-        f"Tu código de restablecimiento es:\n\n{correo.token}\n\n"
-        f"Este código es válido por 1 hora.\n"
+        f"Abre este enlace para elegir una nueva:\n\n{enlace}\n\n"
+        f"El enlace sirve una sola vez y vence en {minutos} minutos.\n"
         f"Si no solicitaste este cambio, puedes ignorar este mensaje.\n"
     )
     if not enviar_correo(correo.destinatario, "Restablecimiento de contraseña", cuerpo):
