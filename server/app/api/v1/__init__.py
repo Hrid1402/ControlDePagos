@@ -5,6 +5,7 @@ from app.api.v1 import (
     auditoria,
     auth,
     bandeja,
+    deudas,
     empresas,
     me,
     ordenes,
@@ -21,6 +22,7 @@ router.include_router(asistentes.router)
 router.include_router(auditoria.router)
 router.include_router(auth.router)
 router.include_router(bandeja.router)
+router.include_router(deudas.router)
 router.include_router(empresas.router)
 router.include_router(me.router)
 router.include_router(ordenes.router)
