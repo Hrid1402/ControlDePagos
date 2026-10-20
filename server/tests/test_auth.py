@@ -213,22 +213,22 @@ def test_el_fallo_queda_en_la_auditoria_de_su_gerente(
     assert vistos_por_uno == []
 
 
-# Bloqueo tras 5 intentos durante 5 minutos (CA06)
+# Bloqueo tras 5 intentos durante 15 minutos (CA06)
 
 
-def test_el_quinto_fallo_bloquea_5_minutos(
+def test_el_quinto_fallo_bloquea_15_minutos(
     cliente: TestClient, db: Session, equipos: DosGerentes
 ) -> None:
     gerente = equipos.uno.gerente
     fallar(cliente, gerente, 4)
     r = ingresar(cliente, gerente.username, "incorrecta")
     assert r.status_code == 423
-    assert r.json() == bloqueada("5 minutos")
+    assert r.json() == bloqueada("15 minutos")
     db.refresh(gerente)
     assert gerente.intentos_fallidos == 5
     assert gerente.bloqueado_hasta is not None
     restante = gerente.bloqueado_hasta - datetime.now(UTC)
-    assert timedelta(minutes=4) < restante <= timedelta(minutes=5)
+    assert timedelta(minutes=14) < restante <= timedelta(minutes=15)
 
 
 @pytest.mark.parametrize("contrasena", [CONTRASENA, "incorrecta"])
@@ -236,12 +236,12 @@ def test_la_cuenta_bloqueada_no_ingresa_ni_cuenta_intentos(
     cliente: TestClient, db: Session, equipos: DosGerentes, contrasena: str
 ) -> None:
     gerente = equipos.uno.gerente
-    hasta = datetime.now(UTC) + timedelta(minutes=4, seconds=30)
+    hasta = datetime.now(UTC) + timedelta(minutes=14, seconds=30)
     gerente.intentos_fallidos, gerente.bloqueado_hasta = 5, hasta
     db.flush()
     r = ingresar(cliente, gerente.username, contrasena)
     assert r.status_code == 423
-    assert r.json() == bloqueada("5 minutos")
+    assert r.json() == bloqueada("15 minutos")
     db.refresh(gerente)
     assert gerente.intentos_fallidos == 5
     assert gerente.bloqueado_hasta == hasta

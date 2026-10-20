@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_expires_minutes: int = 30
     login_intentos_maximos: int = 5
-    login_minutos_bloqueo: int = 5
+    login_minutos_bloqueo: int = 15
     timezone: str = "America/Lima"
     cors_origins: list[str] = ["http://localhost:5173"]
 
