@@ -4,7 +4,15 @@ import { CUENTA, SECCIONES, nombreRuta } from '@/config/navegacion'
 export const rutas: RouteRecordRaw[] = [
   { path: '/login', redirect: (to) => ({ name: 'login', query: to.query, hash: to.hash }) },
   ...(import.meta.env.DEV
-    ? [{ path: '/revision/acceso', redirect: { name: 'login', query: { revision: '1' } } }]
+    ? [
+        { path: '/revision/acceso', redirect: { name: 'login', query: { revision: '1' } } },
+        {
+          path: '/revision/calendario',
+          name: 'revision-calendario',
+          component: () => import('@/pages/CalendarioRevisionPage.vue'),
+          meta: { libre: true, titulo: 'Revisión de calendario' },
+        },
+      ]
     : []),
   {
     path: '/',
