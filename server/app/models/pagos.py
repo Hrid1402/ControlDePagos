@@ -31,6 +31,9 @@ class OrdenPago(ConId, ConActualizado, Base):
     aceptada_en: Mapped[datetime | None]
     pagada_en: Mapped[datetime | None]
     cancelada_en: Mapped[datetime | None]
+    # Importe y moneda que el gerente autorizó al ordenar (migración 0004).
+    monto: Mapped[Decimal]
+    moneda: Mapped[str]
 
 
 class ReporteProblema(ConId, ConActualizado, Base):

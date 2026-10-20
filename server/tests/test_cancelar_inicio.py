@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.eventos import Evento
-from app.models import Auditoria, Deuda, OrdenPago, SolicitudAprobacion, Usuario
+from app.models import Auditoria, Deuda, SolicitudAprobacion, Usuario
 from app.services.pagos import (
     AccionesPago,
     ResultadoInicio,
@@ -19,7 +19,7 @@ from app.services.pagos import (
     iniciar_pago,
 )
 from app.services.saldo import consumo_mes_pen
-from tests.conftest import DosGerentes, nueva_deuda, nuevo_comprobante
+from tests.conftest import DosGerentes, nueva_deuda, nueva_orden, nuevo_comprobante
 
 Publicados = list[tuple[uuid.UUID, Evento]]
 
@@ -229,14 +229,7 @@ def test_la_orden_aceptada_sigue_aceptada_tras_cancelar(
 ) -> None:
     equipo = dos_gerentes.uno
     deuda = iniciada(db, equipo.asistente, equipo.gerente)
-    orden = OrdenPago(
-        deuda_id=deuda.id,
-        gerente_id=equipo.gerente.id,
-        asistente_id=equipo.asistente.id,
-        estado="aceptada",
-    )
-    db.add(orden)
-    db.flush()
+    orden = nueva_orden(db, deuda, "aceptada", asistente=equipo.asistente)
 
     cancelar(db, equipo.asistente, deuda)
 

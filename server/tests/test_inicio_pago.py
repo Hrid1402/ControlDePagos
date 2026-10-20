@@ -226,6 +226,8 @@ def nueva_orden(db: Session, equipo: Equipo, deuda: Deuda, estado: str = "acepta
         gerente_id=equipo.gerente.id,
         asistente_id=equipo.asistente.id,
         estado=estado,
+        monto=deuda.monto,
+        moneda=deuda.moneda,
     )
     db.add(orden)
     db.flush()
@@ -240,7 +242,7 @@ def test_orden_aceptada_autoriza_por_encima_del_limite(
     deuda = nueva_deuda(db, equipo.gerente, monto="100.00", moneda="USD")
     orden = nueva_orden(db, equipo, deuda)
 
-    inicio = iniciar(db, equipo.asistente, deuda, orden=AutorizacionOrden(orden, "USD"))
+    inicio = iniciar(db, equipo.asistente, deuda, orden=AutorizacionOrden(orden))
 
     assert inicio.resultado == ResultadoInicio.INICIADO
     [registro] = auditorias(db, deuda, "pago_iniciado")
@@ -248,7 +250,9 @@ def test_orden_aceptada_autoriza_por_encima_del_limite(
     assert registro.detalle["orden_id"] == str(orden.id)
 
 
-@pytest.mark.parametrize("caso", ["cancelada", "otra_deuda", "otra_asistente", "otra_moneda"])
+@pytest.mark.parametrize(
+    "caso", ["cancelada", "otra_deuda", "otra_asistente", "otra_moneda", "otro_monto"]
+)
 def test_orden_que_ya_no_autoriza_responde_409(
     db: Session, dos_gerentes: DosGerentes, caso: str
 ) -> None:
@@ -259,11 +263,12 @@ def test_orden_que_ya_no_autoriza_responde_409(
         orden.deuda_id = nueva_deuda(db, equipo.gerente).id
     if caso == "otra_asistente":
         orden.asistente_id = None
-    moneda = "USD" if caso == "otra_moneda" else "PEN"
+    if caso == "otra_moneda":
+        orden.moneda = "USD"
+    if caso == "otro_monto":
+        orden.monto = Decimal("90.00")
 
-    error = error_de(
-        lambda: iniciar(db, equipo.asistente, deuda, orden=AutorizacionOrden(orden, moneda))
-    )
+    error = error_de(lambda: iniciar(db, equipo.asistente, deuda, orden=AutorizacionOrden(orden)))
 
     assert (error.status_code, error.code) == (409, "ORDEN_NO_VALIDA")
     assert deuda.estado == "pendiente"
