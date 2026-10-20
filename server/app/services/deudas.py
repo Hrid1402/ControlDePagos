@@ -31,11 +31,10 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
-from app.core.tiempo import ahora_lima
+from app.core.tiempo import ahora_lima, hoy_de
 from app.models import Deuda, Usuario
 from app.schemas.deudas import DeudaEntrada, DeudaExistente
 from app.services.auditoria import Accion, nombre_de, registrar_auditoria
-from app.services.bandeja import hoy_de
 from app.services.notificaciones import TipoNotificacion, notificar
 from app.services.servicios import fila_de, servicio_activo_propio
 

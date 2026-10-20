@@ -18,6 +18,7 @@ from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.busqueda import contiene
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.models import Categoria, Deuda, Empresa, Recurrencia, Servicio, Usuario
@@ -374,12 +375,10 @@ def consulta_servicios(
     if filtros.estado != "todos":
         consulta = consulta.where(Servicio.estado == filtros.estado)
     if filtros.q:
-        patron = filtros.q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        buscado = f"%{patron}%"
         consulta = consulta.where(
             or_(
                 *(
-                    columna.ilike(buscado, escape="\\")
+                    contiene(columna, filtros.q)
                     for columna in (
                         Servicio.alias,
                         Servicio.titular,

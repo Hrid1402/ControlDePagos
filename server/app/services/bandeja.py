@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session, aliased
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.paginacion import Paginacion
-from app.core.tiempo import ahora_lima, zona_horaria
+from app.core.tiempo import ahora_lima, hoy_de, zona_horaria
 from app.models import (
     Categoria,
     Comprobante,
@@ -105,10 +105,6 @@ class Bandeja:
     @property
     def total(self) -> int:
         return self.contadores[self.pestana]
-
-
-def hoy_de(ahora: datetime) -> date:
-    return ahora.astimezone(zona_horaria()).date()
 
 
 def manana_a_las_ocho(ahora: datetime) -> datetime:
