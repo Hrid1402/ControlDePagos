@@ -23,10 +23,12 @@ jobs:
     outputs:
       client: ${{ steps.filtro.outputs.client }}
       server: ${{ steps.filtro.outputs.server }}
-      lockfiles: ${{ steps.filtro.outputs.lockfiles }}
+      lockfiles: ${{ steps.dependencias.outputs.cambiaron }}
       github: ${{ steps.filtro.outputs.github }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - id: filtro
         uses: dorny/paths-filter@v4
         with:
@@ -44,6 +46,38 @@ jobs:
               - 'server/pyproject.toml'
             github:
               - '.github/**'
+      - name: Comprobar cambios reales de dependencias
+        id: dependencias
+        if: steps.filtro.outputs.lockfiles == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const { isDeepStrictEqual } = require('node:util');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
+            const { base, head } = context.payload.pull_request;
+            const archivos = git('diff', '--name-only', '--no-renames', '-z', base.sha, head.sha)
+              .split('\0').filter(Boolean);
+            const directos = new Set(['pnpm-lock.yaml', 'server/uv.lock', 'server/pyproject.toml']);
+            let cambiaron = archivos.some(ruta => directos.has(ruta));
+            for (const ruta of archivos.filter(ruta => /(^|\/)package\.json$/.test(ruta))) {
+              let anterior, actual;
+              try {
+                anterior = git('show', `${base.sha}:${ruta}`);
+                actual = git('show', `${head.sha}:${ruta}`);
+              } catch {
+                // Un manifiesto nuevo o eliminado requiere revisión.
+                cambiaron = true;
+                continue;
+              }
+              const antes = JSON.parse(anterior);
+              const despues = JSON.parse(actual);
+              // Los comandos no modifican paquetes ni su resolución.
+              delete antes.scripts;
+              delete despues.scripts;
+              if (!isDeepStrictEqual(antes, despues)) cambiaron = true;
+            }
+            core.setOutput('cambiaron', String(cambiaron));
 
   estructura:
     name: Estructura de la PR
