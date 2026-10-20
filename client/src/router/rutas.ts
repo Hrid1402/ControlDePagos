@@ -4,7 +4,15 @@ import { CUENTA, SECCIONES, nombreRuta } from '@/config/navegacion'
 export const rutas: RouteRecordRaw[] = [
   { path: '/login', redirect: (to) => ({ name: 'login', query: to.query, hash: to.hash }) },
   ...(import.meta.env.DEV
-    ? [{ path: '/revision/acceso', redirect: { name: 'login', query: { revision: '1' } } }]
+    ? [
+        { path: '/revision/acceso', redirect: { name: 'login', query: { revision: '1' } } },
+        {
+          path: '/revision/calendario',
+          name: 'revision-calendario',
+          component: () => import('@/pages/CalendarioRevisionPage.vue'),
+          meta: { libre: true, titulo: 'Revisión de calendario' },
+        },
+      ]
     : []),
   {
     path: '/',
@@ -32,9 +40,19 @@ export const rutas: RouteRecordRaw[] = [
       ...SECCIONES[rol].map((seccion) => ({
         path: seccion.clave,
         name: nombreRuta(rol, seccion.clave),
-        component: () => import('@/pages/SeccionPendientePage.vue'),
+        component: seccion.pagina ?? (() => import('@/pages/SeccionPendientePage.vue')),
         meta: { titulo: seccion.etiqueta },
       })),
+      ...(rol === 'gerente'
+        ? [
+            {
+              path: 'asistentes/:id',
+              name: 'gerente-asistente',
+              component: () => import('@/pages/AsistenteDetallePage.vue'),
+              meta: { titulo: 'Asistente' },
+            },
+          ]
+        : []),
       {
         path: CUENTA,
         name: nombreRuta(rol, CUENTA),
