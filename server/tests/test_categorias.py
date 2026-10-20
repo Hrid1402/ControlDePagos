@@ -384,3 +384,313 @@ def test_aislamiento_entre_gerentes(
     # Gerente dos no puede eliminarla
     r_del = cliente.delete(f"{CATEGORIAS_URL}/{cat_uno_id}", headers=auth_headers(gerente_dos))
     assert r_del.status_code == 404
+
+
+def test_validacion_nombre_categoria_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Rechaza nombres vacíos, solo espacios o que superan los 40 caracteres (422)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # 1. Nombre vacío
+    r_vacio = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_vacio.status_code == 422
+
+    # 2. Solo espacios
+    r_espacios = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "    ", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_espacios.status_code == 422
+
+    # 3. Supera 40 caracteres
+    r_largo = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "A" * 41, "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_largo.status_code == 422
+
+
+def test_validacion_color_hex_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Valida que el color cumpla con el formato hexadecimal #RRGGBB (422 si no cumple)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # Colores inválidos
+    for color_invalido in ["rojo", "#123", "#GGGGGG", "123456", "#1234567"]:
+        resp = cliente.post(
+            CATEGORIAS_URL,
+            json={"nombre": "Cat Color", "color": color_invalido, "tipo": "monto_fijo"},
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Se esperaba 422 para color {color_invalido}"
+
+
+def test_validacion_tipo_categoria_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Valida que el tipo de categoría pertenezca a los tipos permitidos (422 si no)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # Tipo no reconocido
+    resp = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Tipo", "tipo": "tipo_desconocido"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_mover_servicios_a_misma_categoria_falla_400(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Mover servicios con destino_id igual al origen devuelve 400 MISMA_CATEGORIA."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r_crear = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Misma Categoria", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat_id = r_crear.json()["id"]
+
+    r_mover = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_id}/mover-servicios",
+        json={"destino_id": cat_id},
+        headers=headers,
+    )
+    assert r_mover.status_code == 400
+    assert r_mover.json()["code"] == "MISMA_CATEGORIA"
+
+
+def test_mover_servicios_destino_inexistente_o_ajeno_falla_404(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Mover servicios a categoría inexistente o de otro gerente devuelve 404 NO_ENCONTRADO."""
+    import uuid
+
+    gerente_uno = dos_gerentes.uno.gerente
+    gerente_dos = dos_gerentes.dos.gerente
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Origen G1", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_uno),
+    )
+    cat_origen_id = r1.json()["id"]
+
+    r2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Destino G2", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_dos),
+    )
+    cat_ajena_id = r2.json()["id"]
+
+    # Destino inexistente
+    r_inexistente = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_origen_id}/mover-servicios",
+        json={"destino_id": str(uuid.uuid4())},
+        headers=auth_headers(gerente_uno),
+    )
+    assert r_inexistente.status_code == 404
+
+    # Destino de otro gerente
+    r_ajeno = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_origen_id}/mover-servicios",
+        json={"destino_id": cat_ajena_id},
+        headers=auth_headers(gerente_uno),
+    )
+    assert r_ajeno.status_code == 404
+
+
+def test_eliminar_categoria_con_mover_a_ajeno_o_invalido_falla(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Eliminar categoría con mover_a apuntando a sí misma (400) o ajena (404)."""
+    import uuid
+
+    gerente_uno = dos_gerentes.uno.gerente
+    gerente_dos = dos_gerentes.dos.gerente
+    headers_uno = auth_headers(gerente_uno)
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Con Servicio G1", "tipo": "monto_fijo"},
+        headers=headers_uno,
+    )
+    cat_id = r1.json()["id"]
+    cat_obj = db.get(Categoria, cat_id)
+    assert cat_obj is not None
+    crear_servicio_de_prueba(db, gerente_uno, cat_obj, codigo="SRV-MOV-ERR")
+
+    r_ajena = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Destino G2 Borde", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_dos),
+    )
+    cat_ajena_id = r_ajena.json()["id"]
+
+    # mover_a a sí misma -> 400 MISMA_CATEGORIA
+    r_misma = cliente.delete(f"{CATEGORIAS_URL}/{cat_id}?mover_a={cat_id}", headers=headers_uno)
+    assert r_misma.status_code == 400
+    assert r_misma.json()["code"] == "MISMA_CATEGORIA"
+
+    # mover_a a inexistente -> 404
+    r_inex = cliente.delete(
+        f"{CATEGORIAS_URL}/{cat_id}?mover_a={uuid.uuid4()}", headers=headers_uno
+    )
+    assert r_inex.status_code == 404
+
+    # mover_a a ajena -> 404
+    r_ajeno = cliente.delete(
+        f"{CATEGORIAS_URL}/{cat_id}?mover_a={cat_ajena_id}", headers=headers_uno
+    )
+    assert r_ajeno.status_code == 404
+
+
+def test_actualizar_categoria_conserva_su_nombre_y_rechaza_colision_con_otra(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Actualizar permite conservar el mismo nombre y rechaza el nombre de otra categoría."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicio Agua", "tipo": "servicio_variable"},
+        headers=headers,
+    )
+    cat1_id = r1.json()["id"]
+
+    r2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicio Luz", "tipo": "servicio_variable"},
+        headers=headers,
+    )
+    cat2_id = r2.json()["id"]
+
+    # 1. Conservar mismo nombre cambiando color -> 200 OK
+    r_conserva = cliente.put(
+        f"{CATEGORIAS_URL}/{cat1_id}",
+        json={"nombre": "Servicio Agua", "color": "#06B6D4"},
+        headers=headers,
+    )
+    assert r_conserva.status_code == 200
+    assert r_conserva.json()["color"] == "#06B6D4"
+
+    # 2. Mismo nombre en mayúsculas -> 200 OK
+    r_mayusc = cliente.put(
+        f"{CATEGORIAS_URL}/{cat1_id}",
+        json={"nombre": "SERVICIO AGUA"},
+        headers=headers,
+    )
+    assert r_mayusc.status_code == 200
+    assert r_mayusc.json()["nombre"] == "SERVICIO AGUA"
+
+    # 3. Intentar renombrar cat2 al nombre de cat1 -> 409 CATEGORIA_DUPLICADA
+    r_duplicada = cliente.put(
+        f"{CATEGORIAS_URL}/{cat2_id}",
+        json={"nombre": "servicio agua"},
+        headers=headers,
+    )
+    assert r_duplicada.status_code == 409
+    assert r_duplicada.json()["code"] == "CATEGORIA_DUPLICADA"
+
+
+def test_ordenamiento_precargadas_primero_y_alfabetico(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Las categorías se listan ordenadas: precargadas primero, y luego alfabéticamente."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    # Crear categoría precargada y personalizadas
+    cat_precargada = Categoria(
+        gerente_id=gerente.id,
+        nombre="Z - Precargada",
+        color="#64748B",
+        icono="pi-tag",
+        tipo="monto_fijo",
+        precargada=True,
+    )
+    db.add(cat_precargada)
+    db.commit()
+
+    cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "B - Personalizada", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "A - Personalizada", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+
+    r = cliente.get(CATEGORIAS_URL, headers=headers)
+    assert r.status_code == 200
+    nombres = [c["nombre"] for c in r.json()]
+
+    # La precargada va primero a pesar de empezar con Z
+    assert nombres[0] == "Z - Precargada"
+    # Las personalizadas siguen orden alfabético
+    assert nombres[1] == "A - Personalizada"
+    assert nombres[2] == "B - Personalizada"
+
+
+def test_categoria_con_servicios_dados_de_baja_exige_mover_por_integridad(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Incluso con servicios dados de baja, exige moverlos para preservar llaves foráneas."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r_crear1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicios Antiguos", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat1_id = r_crear1.json()["id"]
+    cat1_obj = db.get(Categoria, cat1_id)
+    assert cat1_obj is not None
+
+    r_crear2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Archivo Historico", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat2_id = r_crear2.json()["id"]
+
+    # Agregar servicio inactivo (dado de baja)
+    crear_servicio_de_prueba(db, gerente, cat1_obj, codigo="OLD-999", activo=False)
+
+    # 1. Eliminar sin mover_a -> 409 CATEGORIA_CON_SERVICIOS
+    r_del_fallo = cliente.delete(f"{CATEGORIAS_URL}/{cat1_id}", headers=headers)
+    assert r_del_fallo.status_code == 409
+    assert r_del_fallo.json()["code"] == "CATEGORIA_CON_SERVICIOS"
+
+    # 2. Eliminar con mover_a -> 200 OK y traspasa los servicios dados de baja
+    r_del_ok = cliente.delete(f"{CATEGORIAS_URL}/{cat1_id}?mover_a={cat2_id}", headers=headers)
+    assert r_del_ok.status_code == 200
+    assert r_del_ok.json()["servicios_movidos"] == 1
