@@ -50,6 +50,8 @@ class Accion(StrEnum):
     USUARIO_CAMBIADO = "usuario_cambiado"
     CONTRASENA_CAMBIADA = "contrasena_cambiada"
     CATEGORIA_CREADA = "categoria_creada"
+    SERVICIO_CREADO = "servicio_creado"
+    SERVICIO_ACTUALIZADO = "servicio_actualizado"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.
