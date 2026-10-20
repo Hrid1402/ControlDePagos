@@ -51,3 +51,43 @@ class AsistenteCreadaSalida(BaseModel):
     creado_en: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AsistenteResumen(BaseModel):
+    """Cuenta de asistente tal como queda tras una acción del gerente (TASK-14)."""
+
+    id: uuid.UUID
+    nombres: str | None
+    apellidos: str | None
+    username: str
+    estado: str
+
+    model_config = {"from_attributes": True}
+
+
+class ActivacionSalida(BaseModel):
+    """Resultado de activar una cuenta (CA10 y CA14). desactivada es la que estaba activa."""
+
+    activada: AsistenteResumen
+    desactivada: AsistenteResumen | None
+    ordenes_traspasadas: list[uuid.UUID]
+
+
+class DesactivacionSalida(BaseModel):
+    """Resultado de desactivar una cuenta (CA11 a CA14). sesiones_cerradas confirma al gerente que
+    la asistente ya no puede seguir trabajando con una sesión abierta."""
+
+    asistente: AsistenteResumen
+    sesiones_cerradas: bool
+    sin_asistente_activa: bool
+    aviso: str | None
+    ordenes_canceladas: list[uuid.UUID]
+
+
+class ContrasenaRestablecidaSalida(BaseModel):
+    """Contraseña nueva de la asistente, devuelta una sola vez (CA16)."""
+
+    id: uuid.UUID
+    username: str
+    contrasena: str
+    contrasena_inicial: bool
