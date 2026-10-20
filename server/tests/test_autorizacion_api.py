@@ -73,6 +73,21 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/ordenes/{orden_id}/rechazar"): (
         "asistente ajena: test_api_ordenes::test_dos_gerentes_no_ven_ni_responden_ordenes_ajenas"
     ),
+    # Gestión de categorías (TASK-28): cobertura de permisos en test_categorias.
+    ("GET", "/api/v1/categorias/{id}"): (
+        "gerente ajeno: test_categorias::test_aislamiento_entre_gerentes"
+    ),
+    ("PUT", "/api/v1/categorias/{id}"): (
+        "gerente ajeno: test_categorias::test_aislamiento_entre_gerentes; "
+        "asistente propia: test_categorias::test_ca04_asistente_no_puede_editar_ni_eliminar_categoria"
+    ),
+    ("POST", "/api/v1/categorias/{id}/mover-servicios"): (
+        "asistente propia: test_categorias::test_ca04_asistente_no_puede_editar_ni_eliminar_categoria"
+    ),
+    ("DELETE", "/api/v1/categorias/{id}"): (
+        "gerente ajeno: test_categorias::test_aislamiento_entre_gerentes; "
+        "asistente propia: test_categorias::test_ca04_asistente_no_puede_editar_ni_eliminar_categoria"
+    ),
     # Gestión de asistentes (TASK-11 y TASK-14): las celdas están en MATRIZ.
     ("GET", "/api/v1/asistentes/{asistente_id}"): "MATRIZ",
     ("POST", "/api/v1/asistentes/{asistente_id}/activar"): "MATRIZ",
