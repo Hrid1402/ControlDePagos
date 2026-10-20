@@ -34,6 +34,7 @@ class Accion(StrEnum):
     CUENTA_ELIMINADA = "cuenta_eliminada"
     DEUDA_MONTO_CAMBIADO = "deuda_monto_cambiado"
     DEUDA_ESTADO_CAMBIADO = "deuda_estado_cambiado"
+    CONTRASENA_RESTABLECIDA = "contrasena_restablecida"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.

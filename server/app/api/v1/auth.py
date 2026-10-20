@@ -10,8 +10,15 @@ from fastapi import APIRouter
 from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
 from app.core.seguridad import crear_token
 from app.models import Usuario
-from app.schemas.acceso import IngresoEntrada, SesionSalida, UsuarioSesion
-from app.services.acceso import iniciar_sesion
+from app.schemas.acceso import (
+    IngresoEntrada,
+    MensajeSalida,
+    RestablecerContrasenaEntrada,
+    SesionSalida,
+    SolicitudRecuperacion,
+    UsuarioSesion,
+)
+from app.services.acceso import iniciar_sesion, restablecer_contrasena, solicitar_recuperacion
 from app.services.auditoria import nombre_de
 
 router = APIRouter(prefix="/auth", tags=["acceso"])
@@ -44,3 +51,19 @@ def yo(usuario: UsuarioActual) -> UsuarioSesion:
     """Usuario de la sesión. El cliente lo pide al recargar para confirmar que el token guardado
     sigue siendo válido."""
     return usuario_sesion(usuario)
+
+
+@router.post("/recuperar-contrasena")
+def recuperar(datos: SolicitudRecuperacion, db: SesionDb, origen: OrigenSolicitud) -> MensajeSalida:
+    """Envía un token de restablecimiento de contraseña al correo registrado."""
+    detalle = solicitar_recuperacion(db, datos.correo, origen)
+    return MensajeSalida(detail=detalle)
+
+
+@router.post("/restablecer-contrasena")
+def restablecer(
+    datos: RestablecerContrasenaEntrada, db: SesionDb, origen: OrigenSolicitud
+) -> MensajeSalida:
+    """Restablece la contraseña utilizando el token recibido por correo."""
+    detalle = restablecer_contrasena(db, datos.token, datos.nueva_contrasena, origen)
+    return MensajeSalida(detail=detalle)

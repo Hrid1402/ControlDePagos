@@ -23,3 +23,22 @@ class SesionSalida(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     usuario: UsuarioSesion
+
+
+class SolicitudRecuperacion(BaseModel):
+    """Correo para solicitar el restablecimiento de contraseña."""
+
+    correo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class RestablecerContrasenaEntrada(BaseModel):
+    """Token recibido por correo y la nueva contraseña elegida."""
+
+    token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    nueva_contrasena: Annotated[str, StringConstraints(min_length=8)]
+
+
+class MensajeSalida(BaseModel):
+    """Respuesta simple con detalle informativo."""
+
+    detail: str
