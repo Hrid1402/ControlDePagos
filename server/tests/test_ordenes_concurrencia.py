@@ -17,12 +17,14 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.eventos import Evento, TipoEvento
+from app.core.seguridad import hashear_contrasena
 from app.core.tiempo import ahora_lima
 from app.models import Auditoria, Deuda, OrdenPago, Usuario
+from app.services.cuenta import bloquear, cambiar_contrasena
 from app.services.ordenes import aceptar_orden, publicar_evento_orden
 from tests.conftest import nueva_deuda, nueva_orden
 from tests.test_inicio_pago_concurrencia import SEGUNDOS_MAXIMOS, abrir, borrar
@@ -68,6 +70,15 @@ def confirmada(publicados: Publicados) -> Iterator[Callable[[], Confirmada]]:
     try:
         yield crear
     finally:
+        # El cambio de contraseña de TASK-8 deja historial, que borrar() no conoce.
+        with engine.begin() as conexion:
+            conexion.execute(
+                text(
+                    "DELETE FROM historial_contrasena WHERE usuario_id IN "
+                    "(SELECT id FROM usuario WHERE id = ANY(:ids) OR gerente_id = ANY(:ids))"
+                ),
+                {"ids": gerentes},
+            )
         borrar(gerentes)
 
 
@@ -270,4 +281,31 @@ def test_el_traspaso_espera_a_que_termine_la_aceptacion(
     resultado(traspaso)
     # Sin interbloqueo: la aceptación se confirmó y el intento queda para que el gerente lo
     # resuelva con cancelar-inicio.
+    assert estado_de(datos) == ("aceptada", "en_proceso", datos.asistente_id)
+
+
+def test_cambiar_la_contrasena_mientras_acepta_responde_401(
+    confirmada: Callable[[], Confirmada], hilos: ThreadPoolExecutor
+) -> None:
+    """TASK-8 bloquea la cuenta y sube token_version: la aceptación, autenticada con el token
+    anterior, espera ese bloqueo y después ve la sesión revocada."""
+    datos = confirmada()
+    with SessionLocal() as db:
+        db.get_one(Usuario, datos.asistente_id).password_hash = hashear_contrasena("Actual-2026")
+        db.commit()
+
+    with abrir() as cuenta:
+        asistente = cuenta.get_one(Usuario, datos.asistente_id)
+        bloquear(cuenta, asistente)
+        acepta = hilos.submit(aceptar_y_confirmar, datos.asistente_id, datos.orden_id)
+        assert queda_esperando(acepta)
+        cambiar_contrasena(cuenta, asistente, "Actual-2026", "Nueva-2026", ORIGEN)
+
+    error = resultado(acepta)
+
+    assert isinstance(error, ErrorApi)
+    assert (error.status_code, error.code) == (401, "SESION_REVOCADA")
+    assert estado_de(datos) == ("enviada", "pendiente", None)
+    # Con la sesión renovada (el usuario vuelto a leer) la orden se acepta.
+    assert resultado(hilos.submit(aceptar_y_confirmar, datos.asistente_id, datos.orden_id)) is False
     assert estado_de(datos) == ("aceptada", "en_proceso", datos.asistente_id)

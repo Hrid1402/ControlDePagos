@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.seguridad import crear_token
+from app.core.seguridad import crear_token, hashear_contrasena
 from app.main import app
 from app.models import Deuda, OrdenPago, Servicio, Usuario
 from tests.conftest import DosGerentes, Equipo, nueva_deuda, nueva_orden
@@ -277,3 +277,26 @@ def test_cancelada_responde_409_para_cerrar_con_aviso(
             "code": "ORDEN_CANCELADA",
             "field": None,
         }
+
+
+def test_cambiar_la_contrasena_revoca_el_token_anterior_para_aceptar(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    equipo.asistente.password_hash = hashear_contrasena("Actual-2026")
+    orden = orden_de(db, equipo)
+    anterior = cabecera(equipo.asistente)
+
+    cambio = cliente.post(
+        "/api/v1/me/contrasena",
+        json={"contrasena_actual": "Actual-2026", "contrasena_nueva": "Nueva-2026"},
+        headers=anterior,
+    )
+    assert cambio.status_code == 200
+    renovada = {"Authorization": f"Bearer {cambio.json()['access_token']}"}
+
+    revocada = cliente.post(ruta(orden, "aceptar"), headers=anterior)
+    assert (revocada.status_code, revocada.json()["code"]) == (401, "SESION_REVOCADA")
+    assert orden.estado == "enviada"
+    aceptada = cliente.post(ruta(orden, "aceptar"), headers=renovada)
+    assert (aceptada.status_code, aceptada.json()["orden"]["estado"]) == (200, "aceptada")
