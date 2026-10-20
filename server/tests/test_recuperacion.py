@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import secrets
+import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.eventos import Evento
 from app.core.seguridad import crear_token, hashear_contrasena
 from app.main import app
 from app.models import Auditoria, HistorialContrasena, TokenRestablecimiento, Usuario
@@ -23,6 +25,7 @@ LOGIN = "/api/v1/auth/login"
 ME = "/api/v1/auth/me"
 RENOVAR = "/api/v1/auth/renovar"
 CAMBIAR_CONTRASENA = "/api/v1/me/contrasena"
+RESTABLECER_POR_GERENTE = "/api/v1/asistentes/{}/restablecer-contrasena"
 IP = "203.0.113.7"
 CONTRASENA_INICIAL = "Clave-inicial-1"
 HASH_INICIAL = hashear_contrasena(CONTRASENA_INICIAL)
@@ -521,4 +524,69 @@ def test_restablecer_no_invalida_los_enlaces_de_otra_cuenta(
     db.refresh(registro_ajeno)
     assert registro_ajeno.usado_en is None
     r = cliente.post(RESTABLECER, json={"token": ajeno, "nueva_contrasena": "Nueva-clave-1"})
+    assert r.status_code == 200
+
+
+# Restablecimiento por el gerente: la salida de quien no tiene correo (H01, TASK-14)
+
+
+def restablecer_por_gerente(cliente: TestClient, gerente: Usuario, asistente: Usuario) -> str:
+    """Restablece la contraseña de la asistente desde la cuenta de su gerente y devuelve la
+    contraseña generada, que la API muestra una sola vez."""
+    r = cliente.post(
+        RESTABLECER_POR_GERENTE.format(asistente.id),
+        headers={"Authorization": f"Bearer {crear_token(gerente)}"},
+    )
+    assert r.status_code == 200, r.text
+    contrasena: str = r.json()["contrasena"]
+    return contrasena
+
+
+def test_la_asistente_sin_correo_restablecida_por_su_gerente_ingresa_con_la_nueva(
+    cliente: TestClient,
+    db: Session,
+    equipos: DosGerentes,
+    correos: list[tuple[str, str, str]],
+    publicados: list[tuple[uuid.UUID, Evento]],
+) -> None:
+    equipo = equipos.uno
+    asistente = equipo.asistente
+    asistente.correo = None
+    db.flush()
+    anterior = {"Authorization": f"Bearer {crear_token(asistente)}"}
+
+    # Sin correo, la recuperación responde lo mismo de siempre y no crea ningún enlace: la
+    # salida es pedirle al gerente que la restablezca.
+    r = cliente.post(SOLICITAR, json={"username": asistente.username})
+    assert r.json() == {"detail": MENSAJE_RECUPERACION_GENERICO}
+    assert (tokens(db), correos) == ([], [])
+
+    nueva = restablecer_por_gerente(cliente, equipo.gerente, asistente)
+
+    r = cliente.post(LOGIN, json={"username": asistente.username, "contrasena": nueva})
+    assert r.status_code == 200
+    r = cliente.post(LOGIN, json={"username": asistente.username, "contrasena": CONTRASENA_INICIAL})
+    assert (r.status_code, r.json()["code"]) == (401, "CREDENCIALES_INVALIDAS")
+    r = cliente.get(ME, headers=anterior)
+    assert (r.status_code, r.json()["code"]) == (401, "SESION_REVOCADA")
+
+
+def test_un_enlace_pedido_antes_de_que_el_gerente_restablezca_queda_invalido(
+    cliente: TestClient,
+    db: Session,
+    equipos: DosGerentes,
+    correos: list[tuple[str, str, str]],
+    publicados: list[tuple[uuid.UUID, Evento]],
+) -> None:
+    # Con correo, porque sin él no se crea enlace: este es el caso de quien pidió el enlace y
+    # luego pidió ayuda al gerente.
+    equipo = equipos.uno
+    pendiente = pedir_enlace(cliente, correos, equipo.asistente)
+
+    nueva = restablecer_por_gerente(cliente, equipo.gerente, equipo.asistente)
+
+    r = cliente.post(RESTABLECER, json={"token": pendiente, "nueva_contrasena": "Otra-clave-2"})
+    assert (r.status_code, r.json()["code"]) == (400, "TOKEN_INVALIDO")
+    assert all(t.usado_en is not None for t in tokens(db))
+    r = cliente.post(LOGIN, json={"username": equipo.asistente.username, "contrasena": nueva})
     assert r.status_code == 200

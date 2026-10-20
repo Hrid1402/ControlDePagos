@@ -25,6 +25,7 @@ from app.core.errores import ErrorApi
 from app.core.seguridad import hashear_contrasena, verificar_contrasena
 from app.models import CambioUsuario, HistorialContrasena, TokenRestablecimiento, Usuario
 from app.services.acceso import restablecer_contrasena
+from app.services.asistentes import restablecer_contrasena_asistente
 from app.services.cuenta import cambiar_contrasena, cambiar_usuario
 
 ORIGEN = Origen(dispositivo="pruebas", ip=None)
@@ -263,3 +264,62 @@ def test_dos_tokens_no_pueden_restablecer_a_la_misma_contrasena(
             )
         )
         assert all(r.usado_en is not None for r in registros)
+
+
+def test_el_enlace_y_el_gerente_restablecen_a_la_vez_sin_interbloquearse(
+    gerentes: Callable[..., list[uuid.UUID]], hilos: ThreadPoolExecutor
+) -> None:
+    [gerente] = gerentes(1)
+    token = secrets.token_urlsafe(32)
+    with SessionLocal() as db:
+        cuenta = Usuario(
+            rol="asistente",
+            gerente_id=gerente,
+            username=f"a_{uuid.uuid4().hex[:12]}",
+            password_hash=HASH,
+        )
+        db.add(cuenta)
+        db.flush()
+        asistente = cuenta.id
+        db.add(
+            TokenRestablecimiento(
+                usuario_id=asistente,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expira_en=datetime.now(UTC) + timedelta(minutes=20),
+            )
+        )
+        db.commit()
+
+    try:
+        salida = threading.Barrier(2, timeout=SEGUNDOS_MAXIMOS)
+        por_enlace = hilos.submit(
+            solicitud,
+            asistente,
+            lambda db, u: restablecer_contrasena(db, token, "Clave-del-enlace-1", ORIGEN),
+            salida,
+        )
+        por_gerente = hilos.submit(
+            solicitud,
+            gerente,
+            lambda db, g: restablecer_contrasena_asistente(db, g, asistente, ORIGEN),
+            salida,
+        )
+        enlace, del_gerente = resultado(por_enlace), resultado(por_gerente)
+
+        # Los dos bloquean primero a la asistente y después sus tokens, así que se atienden de
+        # uno en uno, sin interbloqueo. Si gana el enlace, el gerente restablece después; si gana
+        # el gerente, el enlace ya está usado. En ambos casos queda la contraseña del gerente.
+        assert isinstance(del_gerente, tuple)
+        _, generada = del_gerente
+        assert isinstance(enlace, str) or enlace.code == "TOKEN_INVALIDO"
+        with SessionLocal() as db:
+            final = db.get_one(Usuario, asistente)
+            assert verificar_contrasena(generada, final.password_hash)
+            registro = db.scalar(
+                select(TokenRestablecimiento).where(TokenRestablecimiento.usuario_id == asistente)
+            )
+            assert registro is not None
+            assert registro.usado_en is not None
+    finally:
+        # La asistente antes que el fixture borre a su gerente; el borrado se repite sin efecto.
+        borrar([asistente, gerente])
