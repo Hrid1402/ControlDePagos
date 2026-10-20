@@ -7,11 +7,13 @@ transacción fija un lock_timeout y cada hilo un tiempo máximo: una espera que 
 fallar la prueba en lugar de colgar la suite.
 """
 
+import hashlib
+import secrets
 import threading
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, text
@@ -21,7 +23,8 @@ from app.core.database import SessionLocal, engine
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.seguridad import hashear_contrasena, verificar_contrasena
-from app.models import CambioUsuario, HistorialContrasena, Usuario
+from app.models import CambioUsuario, HistorialContrasena, TokenRestablecimiento, Usuario
+from app.services.acceso import restablecer_contrasena
 from app.services.cuenta import cambiar_contrasena, cambiar_usuario
 
 ORIGEN = Origen(dispositivo="pruebas", ip=None)
@@ -208,3 +211,53 @@ def test_dos_cambios_de_contrasena_simultaneos_con_la_misma_actual_solo_uno_se_a
         ).all()
         assert len(guardadas) == 1
         assert verificar_contrasena(CONTRASENA, guardadas[0])
+
+
+def test_dos_tokens_no_pueden_restablecer_a_la_misma_contrasena(
+    gerentes: Callable[..., list[uuid.UUID]], hilos: ThreadPoolExecutor
+) -> None:
+    [gerente] = gerentes(1)
+    tokens = [secrets.token_urlsafe(32) for _ in range(2)]
+    with SessionLocal() as db:
+        for token in tokens:
+            db.add(
+                TokenRestablecimiento(
+                    usuario_id=gerente,
+                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                    expira_en=datetime.now(UTC) + timedelta(minutes=20),
+                )
+            )
+        db.commit()
+
+    salida = threading.Barrier(2, timeout=SEGUNDOS_MAXIMOS)
+    nueva = "Nueva-clave-2"
+    futuros = [
+        hilos.submit(
+            solicitud,
+            gerente,
+            lambda db, u, token=token: restablecer_contrasena(db, token, nueva, ORIGEN),
+            salida,
+        )
+        for token in tokens
+    ]
+    resultados = [resultado(futuro) for futuro in futuros]
+
+    assert len([r for r in resultados if isinstance(r, str)]) == 1
+    assert codigos(resultados) == ["CONTRASENA_REPETIDA"]
+    with SessionLocal() as db:
+        usuario = db.get_one(Usuario, gerente)
+        assert verificar_contrasena(nueva, usuario.password_hash)
+        assert usuario.token_version == 1
+        assert list(
+            db.scalars(
+                select(HistorialContrasena.password_hash).where(
+                    HistorialContrasena.usuario_id == gerente
+                )
+            )
+        ) == [HASH]
+        registros = list(
+            db.scalars(
+                select(TokenRestablecimiento).where(TokenRestablecimiento.usuario_id == gerente)
+            )
+        )
+        assert sum(r.usado_en is not None for r in registros) == 1
