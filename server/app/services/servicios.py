@@ -1,9 +1,11 @@
 """Servicios del gerente (H10, TASK-33): registro, edición, baja, reactivación y listado.
 
 Unicidad (CA03): uq_servicio_codigo compara gerente, coalesce(empresa_id, lower(empresa_nombre))
-y el código exacto. Por eso el código se guarda ya normalizado (sin espacios y en mayúsculas) y
-un nombre manual que coincide con una empresa del catálogo se guarda como su empresa_id: así
-"calidda" escrito a mano y Cálidda elegida de la lista son el mismo servicio.
+y upper(código). El código se guarda ya normalizado (sin espacios y en mayúsculas) y un nombre
+manual que coincide con una empresa del catálogo se guarda como su empresa_id: así "calidda"
+escrito a mano y Cálidda elegida de la lista son el mismo servicio. La base exige el código sin
+espacios, el nombre manual sin espacios sobrantes y una sola de las dos representaciones
+(migración 0006).
 
 La baja no es una eliminación: solo cambia estado a 'baja' y desactiva la recurrencia;
 eliminado_en no se toca, el código sigue ocupado y las deudas pendientes se conservan (CA08).
@@ -175,7 +177,7 @@ def existe_duplicado(
     consulta = select(Servicio.id).where(
         Servicio.gerente_id == gerente_id,
         Servicio.eliminado_en.is_(None),
-        Servicio.codigo_suministro == codigo,
+        func.upper(Servicio.codigo_suministro) == codigo,
         misma_empresa,
     )
     if excluir_id is not None:
