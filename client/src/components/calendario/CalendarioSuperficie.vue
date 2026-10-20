@@ -1,100 +1,187 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import FullCalendar from '@fullcalendar/vue3'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin, { type DateClickArg } from '@fullcalendar/interaction'
+import listPlugin from '@fullcalendar/list'
+import esLocale from '@fullcalendar/core/locales/es'
+import type { CalendarOptions, DatesSetArg, EventClickArg } from '@fullcalendar/core'
 import type { CategoriaCalendario, DiaCalendario, VistaCalendario } from './modelo'
-import {
-  claveFecha,
-  DIAS_SEMANA,
-  fechaLarga,
-  fechasVisibles,
-  moverPeriodo,
-  tituloPeriodo,
-} from './fechas'
+import { claveFecha, fechaLarga, fechaLocal, hoyLima, sumarDias } from './fechas'
+import type { FiltrosCalendario } from '@/api/calendario'
 
 const props = withDefaults(
   defineProps<{
     dias?: DiaCalendario[]
     categorias?: CategoriaCalendario[]
     estadoPantalla?: 'lista' | 'cargando' | 'error'
+    mensajeError?: string
     exportable?: boolean
+    exportando?: boolean
   }>(),
-  { dias: () => [], categorias: () => [], estadoPantalla: 'lista', exportable: false },
+  {
+    dias: () => [],
+    categorias: () => [],
+    estadoPantalla: 'lista',
+    mensajeError: '',
+    exportable: false,
+    exportando: false,
+  },
 )
-
 const emit = defineEmits<{
-  filtrar: [filtros: { categoria: string; estado: string }]
+  consultar: [filtros: FiltrosCalendario]
   exportar: []
   reintentar: []
   abrirDeuda: [id: string]
-  periodo: [desde: string, hasta: string]
 }>()
 
-const hoy = new Date()
-const fecha = ref(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()))
-const diaSeleccionado = ref(claveFecha(fecha.value))
-const vista = ref<VistaCalendario>('mes')
+const calendario = ref<InstanceType<typeof FullCalendar> | null>(null)
+const diaSeleccionado = ref(hoyLima())
+const vista = ref<VistaCalendario>(
+  typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches
+    ? 'lista'
+    : 'mes',
+)
+const vistaInicial = vista.value
+const titulo = ref('')
+const desde = ref('')
+const hasta = ref('')
 const categoria = ref('')
 const estado = ref('')
-
-onMounted(() => {
-  if (window.matchMedia('(max-width: 767px)').matches) vista.value = 'lista'
-})
-
-const fechas = computed(() => fechasVisibles(fecha.value, vista.value))
+const vistas = { mes: 'dayGridMonth', semana: 'dayGridWeek', lista: 'listMonth' }
 const diasPorFecha = computed(() => new Map(props.dias.map((dia) => [dia.fecha, dia])))
-const fechasLista = computed(() =>
-  fechas.value.filter((dia) => diasPorFecha.value.get(claveFecha(dia))?.deudas.length),
-)
 const diaActivo = computed(() => diasPorFecha.value.get(diaSeleccionado.value))
-const fechaActiva = computed(() => {
-  const [anio = 0, mes = 1, dia = 1] = diaSeleccionado.value.split('-').map(Number)
-  return new Date(anio, mes - 1, dia)
-})
-const totalVencimientos = computed(() =>
-  props.dias.reduce((total, dia) => total + dia.deudas.length, 0),
-)
+const totalVencimientos = computed(() => props.dias.reduce((n, dia) => n + dia.deudas.length, 0))
 
-watch(
-  [fechas, categoria, estado],
-  () => {
-    const primera = fechas.value[0]
-    const ultima = fechas.value[fechas.value.length - 1]
-    if (primera && ultima) emit('periodo', claveFecha(primera), claveFecha(ultima))
-    emit('filtrar', { categoria: categoria.value, estado: estado.value })
-  },
-  { immediate: true },
-)
+function consultar() {
+  if (desde.value && hasta.value)
+    emit('consultar', {
+      desde: desde.value,
+      hasta: hasta.value,
+      categoria: categoria.value,
+      estado: estado.value,
+    })
+}
+watch([categoria, estado], consultar)
 
-function navegar(direccion: number) {
-  fecha.value = moverPeriodo(fecha.value, vista.value, direccion)
-  diaSeleccionado.value = claveFecha(fecha.value)
+function rangoCambiado(info: DatesSetArg) {
+  titulo.value = info.view.title.charAt(0).toUpperCase() + info.view.title.slice(1)
+  vista.value =
+    info.view.type === 'dayGridWeek' ? 'semana' : info.view.type === 'listMonth' ? 'lista' : 'mes'
+  desde.value = claveFecha(info.start)
+  hasta.value = claveFecha(sumarDias(info.end, -1))
+  if (diaSeleccionado.value < desde.value || diaSeleccionado.value > hasta.value)
+    diaSeleccionado.value = claveFecha(info.view.currentStart)
+  consultar()
 }
 
-function irHoy() {
-  fecha.value = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())
-  diaSeleccionado.value = claveFecha(fecha.value)
+function seleccionarDia(info: DateClickArg) {
+  diaSeleccionado.value = info.dateStr.slice(0, 10)
 }
-
-function elegirDia(fechaElegida: Date) {
-  diaSeleccionado.value = claveFecha(fechaElegida)
-  fecha.value = fechaElegida
+function seleccionarDeuda(info: EventClickArg) {
+  info.jsEvent.preventDefault()
+  if (info.event.start) diaSeleccionado.value = claveFecha(info.event.start)
+  emit('abrirDeuda', info.event.id)
 }
-
 function nombreEstado(valor: string): string {
-  if (valor === 'esperando_recibo') return 'Esperando recibo'
-  if (valor === 'vencida') return 'Vencida'
-  if (valor === 'pagada') return 'Pagada'
-  return 'Pendiente'
+  const nombres: Record<string, string> = {
+    esperando_recibo: 'Esperando recibo',
+    esperando_aprobacion: 'Esperando aprobación',
+    en_proceso: 'En proceso',
+    por_validar: 'Por validar',
+    pagada_parcial: 'Pagada parcial',
+    con_problema: 'Con problema',
+    vencida: 'Vencida',
+    pagada: 'Pagada',
+    pendiente: 'Pendiente',
+  }
+  return nombres[valor] || 'Pendiente'
 }
-
 function colorEstado(valor: string): string {
   if (valor === 'esperando_recibo') return 'esperando'
   if (valor === 'vencida') return 'vencida'
   if (valor === 'pagada') return 'pagada'
   return 'pendiente'
 }
-
 function moneda(valor: string, codigo: string): string {
-  return `${codigo === 'PEN' ? 'S/' : '$'} ${valor}`
+  return (codigo === 'PEN' ? 'S/ ' : '$ ') + valor
+}
+
+const opciones = computed<CalendarOptions>(() => {
+  const seleccion = diaSeleccionado.value
+  return {
+    plugins: [dayGridPlugin, interactionPlugin, listPlugin],
+    locale: esLocale,
+    initialDate: hoyLima(),
+    initialView: vistas[vistaInicial],
+    firstDay: 1,
+    headerToolbar: false,
+    height: 'auto',
+    fixedWeekCount: false,
+    dayMaxEvents: 3,
+    navLinks: true,
+    navLinkDayClick: (fecha) => {
+      diaSeleccionado.value = claveFecha(fecha)
+    },
+    navLinkHint: 'Ver deudas de $0',
+    displayEventTime: false,
+    noEventsContent: 'Sin vencimientos en este periodo',
+    datesSet: rangoCambiado,
+    dateClick: seleccionarDia,
+    eventClick: seleccionarDeuda,
+    events: props.dias.flatMap((dia) =>
+      dia.deudas.map((deuda) => ({
+        id: deuda.id,
+        title: deuda.nombre,
+        start: deuda.fecha_vencimiento,
+        allDay: true,
+        classNames: ['fc-deuda--' + colorEstado(deuda.estado)],
+        extendedProps: { estado: deuda.estado },
+      })),
+    ),
+    eventDidMount: (info) => {
+      info.el.setAttribute(
+        'aria-label',
+        info.event.title + ', ' + nombreEstado(String(info.event.extendedProps.estado)),
+      )
+    },
+    dayCellClassNames: (info) => {
+      const fecha = claveFecha(info.date)
+      return [
+        fecha === seleccion ? 'fc-dia--activo' : '',
+        diasPorFecha.value.has(fecha) ? 'fc-dia--con-deudas' : '',
+      ].filter(Boolean)
+    },
+    dayCellContent: (info) => {
+      const contenido = document.createElement('span')
+      contenido.className = 'fc-dia-cabecera'
+      const numero = document.createElement('span')
+      numero.textContent = info.dayNumberText
+      contenido.append(numero)
+      const dia = diasPorFecha.value.get(claveFecha(info.date))
+      if (dia)
+        for (const [codigo, valor] of Object.entries(dia.totales_confirmados)) {
+          if (!valor) continue
+          const total = document.createElement('span')
+          total.className = 'fc-dia-total'
+          total.textContent = moneda(valor, codigo)
+          contenido.append(total)
+        }
+      return { domNodes: [contenido] }
+    },
+  }
+})
+function navegar(direccion: number) {
+  if (direccion < 0) calendario.value?.getApi().prev()
+  else calendario.value?.getApi().next()
+}
+function irHoy() {
+  const fecha = hoyLima()
+  calendario.value?.getApi().gotoDate(fecha)
+  diaSeleccionado.value = fecha
+}
+function cambiarVista(nueva: VistaCalendario) {
+  calendario.value?.getApi().changeView(vistas[nueva])
 }
 </script>
 
@@ -107,10 +194,9 @@ function moneda(valor: string, codigo: string): string {
       </div>
       <button class="exportar" type="button" :disabled="!exportable" @click="emit('exportar')">
         <i class="pi pi-download" aria-hidden="true"></i>
-        Exportar calendario
+        {{ exportando ? 'Preparando archivo…' : 'Exportar calendario' }}
       </button>
     </header>
-
     <div class="barra" aria-label="Controles del calendario">
       <div class="periodo">
         <div class="flechas" aria-label="Navegar fechas">
@@ -121,7 +207,7 @@ function moneda(valor: string, codigo: string): string {
             <i class="pi pi-chevron-right" aria-hidden="true"></i>
           </button>
         </div>
-        <h2>{{ tituloPeriodo(fecha, vista) }}</h2>
+        <h2>{{ titulo }}</h2>
         <button class="hoy" type="button" @click="irHoy">Hoy</button>
       </div>
       <div class="vistas" role="group" aria-label="Vista del calendario">
@@ -131,13 +217,12 @@ function moneda(valor: string, codigo: string): string {
           type="button"
           :aria-pressed="vista === opcion"
           :class="{ activa: vista === opcion }"
-          @click="vista = opcion"
+          @click="cambiarVista(opcion)"
         >
           {{ opcion === 'mes' ? 'Mes' : opcion === 'semana' ? 'Semana' : 'Lista' }}
         </button>
       </div>
     </div>
-
     <div class="filtros">
       <div class="filtro">
         <label for="calendario-categoria">Categoría</label>
@@ -162,91 +247,30 @@ function moneda(valor: string, codigo: string): string {
         {{ totalVencimientos }} {{ totalVencimientos === 1 ? 'vencimiento' : 'vencimientos' }}
       </p>
     </div>
-
-    <div v-if="estadoPantalla === 'error'" class="mensaje error" role="alert">
-      <i class="pi pi-exclamation-circle" aria-hidden="true"></i>
-      <div>
-        <h2>No pudimos cargar el calendario</h2>
-        <p>Revisa tu conexión e inténtalo de nuevo. Tus filtros se conservarán.</p>
-        <button type="button" @click="emit('reintentar')">Reintentar</button>
-      </div>
-    </div>
-    <div v-else-if="estadoPantalla === 'cargando'" class="cargando" aria-busy="true">
-      <p role="status">Cargando vencimientos…</p>
-      <div class="esqueleto"></div>
-    </div>
-    <div v-else class="cuerpo" :class="{ 'cuerpo--lista': vista === 'lista' }">
-      <div class="tablero">
+    <div class="cuerpo">
+      <div class="tablero" :aria-busy="estadoPantalla === 'cargando'">
+        <FullCalendar ref="calendario" :options="opciones" />
+        <div v-if="estadoPantalla === 'cargando'" class="calendario-capa" role="status">
+          Cargando vencimientos…
+        </div>
         <div
-          v-if="vista !== 'lista'"
-          class="rejilla"
-          :class="{ 'rejilla--semana': vista === 'semana' }"
+          v-else-if="estadoPantalla === 'error'"
+          class="calendario-capa calendario-capa--error"
+          role="alert"
         >
-          <div v-for="nombre in DIAS_SEMANA" :key="nombre" class="nombre-dia">{{ nombre }}</div>
-          <button
-            v-for="dia in fechas"
-            :key="claveFecha(dia)"
-            class="celda"
-            :class="{
-              'celda--ajena': dia.getMonth() !== fecha.getMonth() && vista === 'mes',
-              'celda--hoy': claveFecha(dia) === claveFecha(hoy),
-              'celda--activa': claveFecha(dia) === diaSeleccionado,
-            }"
-            type="button"
-            :aria-label="`${fechaLarga(dia)}: ${diasPorFecha.get(claveFecha(dia))?.deudas.length || 0} vencimientos`"
-            :aria-pressed="claveFecha(dia) === diaSeleccionado"
-            @click="elegirDia(dia)"
-          >
-            <span class="numero">{{ dia.getDate() }}</span>
-            <span v-if="diasPorFecha.get(claveFecha(dia))?.deudas.length" class="marcas">
-              <span
-                v-for="deuda in diasPorFecha.get(claveFecha(dia))?.deudas.slice(0, 3)"
-                :key="deuda.id"
-                class="marca-estado"
-                :class="`marca-estado--${colorEstado(deuda.estado)}`"
-              ></span>
-            </span>
-            <span
-              v-if="diasPorFecha.get(claveFecha(dia))?.totales_confirmados.PEN"
-              class="monto-dia"
-            >
-              {{ moneda(diasPorFecha.get(claveFecha(dia))!.totales_confirmados.PEN!, 'PEN') }}
-            </span>
-          </button>
-        </div>
-        <div v-else-if="fechasLista.length" class="lista-fechas">
-          <button
-            v-for="dia in fechasLista"
-            :key="claveFecha(dia)"
-            type="button"
-            class="fila-fecha"
-            :class="{ 'fila-fecha--activa': claveFecha(dia) === diaSeleccionado }"
-            :aria-pressed="claveFecha(dia) === diaSeleccionado"
-            @click="elegirDia(dia)"
-          >
-            <span class="fecha-lista">
-              <strong>{{ dia.getDate() }}</strong>
-              <span>{{ fechaLarga(dia) }}</span>
-            </span>
-            <span class="resumen-lista">
-              {{ diasPorFecha.get(claveFecha(dia))?.deudas.length || 0 }}
-              {{ diasPorFecha.get(claveFecha(dia))?.deudas.length === 1 ? 'deuda' : 'deudas' }}
-            </span>
-            <i class="pi pi-chevron-right" aria-hidden="true"></i>
-          </button>
-        </div>
-        <div v-else class="lista-vacia">
-          <i class="pi pi-calendar" aria-hidden="true"></i>
-          <h3>Sin vencimientos este mes</h3>
-          <p>Cuando haya pagos previstos, aparecerán aquí por fecha.</p>
+          <h2>No pudimos cargar el calendario</h2>
+          <p>
+            {{ mensajeError || 'Revisa tu conexión e inténtalo de nuevo.' }} Tus filtros se
+            conservarán.
+          </p>
+          <button type="button" @click="emit('reintentar')">Reintentar</button>
         </div>
       </div>
-
       <aside class="detalle" aria-label="Deudas del día seleccionado">
         <header class="detalle-cabecera">
           <div>
             <p class="detalle-contexto">Día seleccionado</p>
-            <h2>{{ fechaLarga(fechaActiva) }}</h2>
+            <h2>{{ fechaLarga(fechaLocal(diaSeleccionado)) }}</h2>
           </div>
           <span class="detalle-conteo">{{ diaActivo?.deudas.length || 0 }}</span>
         </header>
@@ -258,14 +282,20 @@ function moneda(valor: string, codigo: string): string {
             class="deuda"
             @click="emit('abrirDeuda', deuda.id)"
           >
-            <span class="deuda-principal">
-              <strong>{{ deuda.nombre }}</strong>
-              <span class="estado" :class="`estado--${colorEstado(deuda.estado)}`">
-                {{ nombreEstado(deuda.estado) }}
-              </span>
+            <span class="deuda-principal"
+              ><strong>{{ deuda.nombre }}</strong>
+              <span class="estado" :class="'estado--' + colorEstado(deuda.estado)">{{
+                nombreEstado(deuda.estado)
+              }}</span>
             </span>
             <span class="deuda-monto">
-              {{ deuda.monto ? moneda(deuda.monto, deuda.moneda) : 'Importe por confirmar' }}
+              {{
+                deuda.monto
+                  ? moneda(deuda.monto, deuda.moneda)
+                  : deuda.monto_proyectado
+                    ? moneda(deuda.monto_proyectado, deuda.moneda) + ' estimado'
+                    : 'Importe por confirmar'
+              }}
               <i class="pi pi-arrow-up-right" aria-hidden="true"></i>
             </span>
           </button>
@@ -291,10 +321,10 @@ function moneda(valor: string, codigo: string): string {
       <span v-for="clave in ['pendiente', 'pagada', 'vencida', 'esperando_recibo']" :key="clave">
         <i
           class="marca-estado"
-          :class="`marca-estado--${colorEstado(clave)}`"
+          :class="'marca-estado--' + colorEstado(clave)"
           aria-hidden="true"
-        ></i>
-        {{ nombreEstado(clave) }}
+        ></i
+        >{{ nombreEstado(clave) }}
       </span>
     </footer>
   </section>
