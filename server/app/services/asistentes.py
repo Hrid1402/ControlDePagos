@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.eventos import TipoEvento, avisar_cierre_sesion
+from app.core.reglas import LARGO_MINIMO_USERNAME
 from app.core.seguridad import generar_contrasena_segura, hashear_contrasena
 from app.core.tiempo import ahora_lima
 from app.models import ActivacionCuenta, OrdenPago, Usuario
@@ -55,25 +56,36 @@ def sugerir_username_disponible(db: Session, base: str) -> str:
         sufijo += 1
 
 
+# Partículas que forman parte del primer apellido: «De la Cruz» es un solo apellido.
+PARTICULAS_APELLIDO = frozenset({"de", "del", "la", "las", "los", "y", "san", "santa"})
+
+
+def primer_apellido(apellidos: str) -> str:
+    """Primer apellido con sus partículas iniciales: «De la Cruz Pérez» da «delacruz»."""
+    partes = normalizar_texto(apellidos).split()
+    tomadas: list[str] = []
+    for parte in partes:
+        tomadas.append(parte)
+        if parte not in PARTICULAS_APELLIDO:
+            break
+    return re.sub(r"[^a-z0-9]", "", "".join(tomadas))
+
+
 def generar_username_base(nombres: str, apellidos: str) -> str:
-    """Genera un username base en formato nombre.apellido en minúsculas y sin acentos."""
-    partes_nombre = normalizar_texto(nombres).split()
-    partes_apellido = normalizar_texto(apellidos).split()
-
-    primer_nombre = re.sub(r"[^a-z0-9]", "", partes_nombre[0]) if partes_nombre else "asistente"
-    primer_apellido = (
-        re.sub(r"[^a-z0-9]", "", partes_apellido[0]) if partes_apellido else "asistente"
-    )
-
-    base = f"{primer_nombre}.{primer_apellido}"[:25]
-    return base
+    """CA05: formato corto, inicial del primer nombre y primer apellido, en minúsculas y sin
+    tildes. «Lucía Mariana» «Gómez Flores» da «lgomez»."""
+    nombre = re.sub(r"[^a-z0-9]", "", normalizar_texto(nombres))
+    apellido = primer_apellido(apellidos)
+    base = f"{nombre[:1]}{apellido}"[:25]
+    return base or "asistente"
 
 
 def generar_username_disponible(db: Session, nombres: str, apellidos: str) -> str:
-    """Genera un username único y disponible a partir de nombres y apellidos."""
+    """Genera un username único a partir de nombres y apellidos; si está ocupado, o es más corto
+    que el mínimo, se le agrega un número (CA05)."""
     base = generar_username_base(nombres, apellidos)
     ocupado = db.scalar(select(Usuario.id).where(func.lower(Usuario.username) == base.lower()))
-    if ocupado is None:
+    if ocupado is None and len(base) >= LARGO_MINIMO_USERNAME:
         return base
     return sugerir_username_disponible(db, base)
 
