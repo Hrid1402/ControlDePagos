@@ -1,5 +1,6 @@
 import { esquemaUsuario, vencimiento } from '@/stores/sesion'
 import type { CredencialesIngreso } from '@/types/acceso'
+import type { PerfilCuenta } from '@/types/cuenta'
 import type { ErrorApi, UsuarioSesion } from '@/types/api'
 import { http } from './http'
 
@@ -34,4 +35,9 @@ export async function solicitarRecuperacion(username: string): Promise<string> {
 
 export async function restablecerContrasena(token: string, nuevaContrasena: string): Promise<void> {
   await http.post('/auth/restablecer-contrasena', { token, nueva_contrasena: nuevaContrasena })
+}
+
+export async function obtenerPerfil(): Promise<PerfilCuenta> {
+  const { data } = await http.get<PerfilCuenta>('/usuarios/perfil')
+  return data
 }

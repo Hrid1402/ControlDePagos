@@ -1,4 +1,6 @@
 import type { RouteRecordRaw } from 'vue-router'
+import { CUENTA, SECCIONES, nombreRuta } from '@/config/navegacion'
+
 export const rutas: RouteRecordRaw[] = [
   { path: '/login', redirect: (to) => ({ name: 'login', query: to.query, hash: to.hash }) },
   ...(import.meta.env.DEV
@@ -27,11 +29,17 @@ export const rutas: RouteRecordRaw[] = [
     component: () => import('@/layouts/EspacioLayout.vue'),
     meta: { rol },
     children: [
+      ...SECCIONES[rol].map((seccion) => ({
+        path: seccion.clave,
+        name: nombreRuta(rol, seccion.clave),
+        component: () => import('@/pages/SeccionPendientePage.vue'),
+        meta: { titulo: seccion.etiqueta },
+      })),
       {
-        path: '',
-        name: `${rol}-inicio`,
-        component: () => import('@/pages/InicioPage.vue'),
-        meta: { titulo: 'Mi espacio' },
+        path: CUENTA,
+        name: nombreRuta(rol, CUENTA),
+        component: () => import('@/pages/MiCuentaPage.vue'),
+        meta: { titulo: 'Mi cuenta' },
       },
     ],
   })),
