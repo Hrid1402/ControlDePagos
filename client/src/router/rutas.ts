@@ -12,6 +12,12 @@ export const rutas: RouteRecordRaw[] = [
           component: () => import('@/pages/CalendarioRevisionPage.vue'),
           meta: { libre: true, titulo: 'Revisión de calendario' },
         },
+        {
+          path: '/revision/limites',
+          name: 'revision-limites',
+          component: () => import('@/pages/LimitesRevisionPage.vue'),
+          meta: { libre: true, titulo: 'Revisión de límites' },
+        },
       ]
     : []),
   {
