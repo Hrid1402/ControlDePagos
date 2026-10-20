@@ -39,14 +39,18 @@ function errorHttp(status: number, data: unknown, config?: InternalAxiosRequestC
 }
 
 describe('sesión', () => {
-  it('persiste y restaura únicamente token e identidad; cerrar limpia todo', () => {
+  it('persiste token identidad y actividad; cerrar limpia todo', () => {
     const sesion = useSesionStore()
     expect(sesion.estaAutenticado).toBe(false)
     sesion.iniciar('token', usuario)
     setActivePinia(createPinia())
     expect(useSesionStore().rol).toBe('gerente')
     expect(useSesionStore().token).toBe('token')
-    expect(JSON.parse(localStorage.getItem(CLAVE_SESION)!)).toEqual({ token: 'token', usuario })
+    expect(JSON.parse(localStorage.getItem(CLAVE_SESION)!)).toEqual({
+      token: 'token',
+      usuario,
+      actividad: expect.any(Number),
+    })
     useSesionStore().cerrar()
     expect(useSesionStore().usuario).toBeNull()
     expect(localStorage.getItem(CLAVE_SESION)).toBeNull()
