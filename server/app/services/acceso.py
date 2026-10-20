@@ -11,14 +11,12 @@ from enum import StrEnum
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.seguridad import HASH_RELLENO, verificar_contrasena
 from app.models import Usuario
 from app.services.auditoria import Accion, registrar_auditoria, registrar_login_desconocido
-
-MAXIMO_INTENTOS = 5
-MINUTOS_BLOQUEO = 15
 
 
 class Motivo(StrEnum):
@@ -80,9 +78,9 @@ def rechazar(
 
 
 def iniciar_sesion(db: Session, username: str, contrasena: str, origen: Origen) -> Usuario:
-    """Valida las credenciales y devuelve el usuario que ingresa. Tras 5 contraseñas incorrectas
-    la cuenta se bloquea 15 minutos; el contador se reinicia al ingresar o al terminar el
-    bloqueo. El estado inactivo solo se revela a quien conoce la contraseña."""
+    """Valida las credenciales y devuelve el usuario que ingresa. Tras intentos fallidos
+    la cuenta se bloquea los minutos configurados; el contador se reinicia al ingresar o al
+    terminar el bloqueo. El estado inactivo solo se revela a quien conoce la contraseña."""
     usuario = buscar_para_ingreso(db, username)
     if usuario is None:
         # Verificar igual iguala el tiempo de respuesta al de una cuenta real.
@@ -106,8 +104,8 @@ def iniciar_sesion(db: Session, username: str, contrasena: str, origen: Origen) 
     if not verificar_contrasena(contrasena, usuario.password_hash):
         usuario.intentos_fallidos += 1
         error = credenciales_invalidas()
-        if usuario.intentos_fallidos >= MAXIMO_INTENTOS:
-            usuario.bloqueado_hasta = ahora + timedelta(minutes=MINUTOS_BLOQUEO)
+        if usuario.intentos_fallidos >= settings.login_intentos_maximos:
+            usuario.bloqueado_hasta = ahora + timedelta(minutes=settings.login_minutos_bloqueo)
             error = cuenta_bloqueada(usuario.bloqueado_hasta, ahora)
         raise rechazar(db, usuario, Motivo.CONTRASENA_INCORRECTA, error, origen)
 
