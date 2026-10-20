@@ -23,3 +23,6 @@ uploads/
 # Cobertura de pruebas
 .coverage
 htmlcov/
+
+# Especificaciones y diseños locales: fuente de verdad en Notion.
+docs/
