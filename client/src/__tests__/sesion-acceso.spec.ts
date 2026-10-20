@@ -75,6 +75,7 @@ function routerPrueba() {
         component: pagina,
         meta: { rol: 'asistente' },
       },
+      { path: '/sin-permiso', name: 'sin-permiso', component: pagina, meta: { libre: true } },
       { path: '/:resto(.*)*', name: 'no-encontrada', component: pagina, meta: { libre: true } },
     ],
   })
@@ -96,12 +97,12 @@ describe('identidad confirmada y acceso', () => {
     expect(router.currentRoute.value.name).toBe('login')
     expect(router.currentRoute.value.query.redirect).toBe(`/${rol}`)
   })
-  it('redirige una ruta ajena y permite la propia', () => {
+  it('lleva a sin permiso una ruta de otro rol y permite la propia (CA11)', () => {
     const destino = {
       meta: { rol: 'gerente' },
       fullPath: '/gerente',
     } as unknown as RouteLocationNormalized
-    expect(resolverAcceso(destino, 'asistente')).toEqual({ name: 'asistente-inicio' })
+    expect(resolverAcceso(destino, 'asistente')).toEqual({ name: 'sin-permiso' })
     expect(resolverAcceso(destino, 'gerente')).toBe(true)
   })
   it('retorna a una ruta propia conservando búsqueda y descarta destinos externos, públicos o ajenos', async () => {
@@ -118,6 +119,23 @@ describe('identidad confirmada y acceso', () => {
       ['otra'],
     ])
       expect(retornoAutorizado(router, destino, 'gerente')).toEqual({ name: 'gerente-inicio' })
+  })
+  it.each([
+    ['asistente', '/gerente/deudas'],
+    ['gerente', '/asistente'],
+  ] as const)('%s que escribe la dirección ajena %s ve que no tiene acceso', async (rol, ruta) => {
+    const real = { ...usuario, rol }
+    http.defaults.adapter = async (config) => ({
+      data: real,
+      status: 200,
+      statusText: '',
+      headers: {},
+      config,
+    })
+    sesion().iniciar(jwt(), real)
+    const router = routerPrueba()
+    await router.push(ruta)
+    expect(router.currentRoute.value.name).toBe('sin-permiso')
   })
   it('muestra no encontrada y usa Deconsta como título sin metadata', async () => {
     const router = routerPrueba()

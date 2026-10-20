@@ -17,10 +17,10 @@ export const rutas: RouteRecordRaw[] = [
     meta:
       nombre === 'sin-permiso'
         ? { libre: true, titulo: 'Sin acceso' }
-        : {
-            publica: true,
-            titulo: nombre === 'recuperar' ? 'Recuperar acceso' : 'Nueva contraseña',
-          },
+        : nombre === 'restablecer'
+          ? // El enlace del correo debe abrirse aunque haya otra sesión abierta.
+            { libre: true, titulo: 'Nueva contraseña' }
+          : { publica: true, titulo: 'Recuperar acceso' },
   })),
   ...(['gerente', 'asistente'] as const).map((rol) => ({
     path: `/${rol}`,

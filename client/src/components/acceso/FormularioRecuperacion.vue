@@ -3,27 +3,34 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import CampoAcceso from './CampoAcceso.vue'
+import { esquemaUsername } from '@/config/reglas'
 const props = defineProps<{ cargando?: boolean }>()
-const emit = defineEmits<{ enviar: [correo: string]; volver: [] }>()
-const { handleSubmit } = useForm({
-  initialValues: { correo: '' },
-  validationSchema: toTypedSchema(
-    z.object({ correo: z.string().trim().email('Escribe un correo válido.') }),
-  ),
+const emit = defineEmits<{ enviar: [username: string]; volver: [] }>()
+const { handleSubmit, setErrors } = useForm({
+  initialValues: { username: '' },
+  validationSchema: toTypedSchema(z.object({ username: esquemaUsername })),
 })
-const enviar = handleSubmit(({ correo }) => {
-  if (!props.cargando) emit('enviar', correo)
+const enfocar = () => document.querySelector<HTMLInputElement>('input[name="username"]')?.focus()
+const enviar = handleSubmit(({ username }) => {
+  if (!props.cargando) emit('enviar', username)
+}, enfocar)
+defineExpose({
+  marcarError(mensaje: string) {
+    setErrors({ username: mensaje })
+    enfocar()
+  },
 })
 </script>
 <template>
   <section class="hoja-acceso">
     <form class="campos-recuperacion" novalidate :aria-busy="cargando" @submit="enviar">
       <CampoAcceso
-        nombre="correo"
-        etiqueta="Correo de tu cuenta"
-        tipo="email"
-        placeholder="nombre@empresa.com"
-        autocomplete="email"
+        nombre="username"
+        etiqueta="Usuario"
+        placeholder="Tu nombre de usuario"
+        autocomplete="username"
+        autocapitalize="none"
+        :spellcheck="false"
         :disabled="cargando"
       />
       <button class="boton-acceso" type="submit" :disabled="cargando">
@@ -32,7 +39,10 @@ const enviar = handleSubmit(({ correo }) => {
     </form>
     <div class="pie-hoja">
       <button type="button" class="enlace-acceso" @click="emit('volver')">Volver al acceso</button>
-      <p>Si aún no registraste un correo, contacta con quien te entregó el acceso.</p>
+      <p>
+        El enlace llega al correo registrado en tu cuenta. Si no tienes uno, pide al gerente que la
+        restablezca.
+      </p>
     </div>
   </section>
 </template>

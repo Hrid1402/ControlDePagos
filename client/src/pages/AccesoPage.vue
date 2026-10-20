@@ -7,13 +7,25 @@ import FormularioRecuperacion from '@/components/acceso/FormularioRecuperacion.v
 import FormularioClave from '@/components/acceso/FormularioClave.vue'
 import { controlSesionKey } from '@/services/controlSesion'
 import { retornoAutorizado } from '@/router/guard'
-import type { EstadoIngreso, PantallaAcceso } from '@/types/acceso'
+import { useSesionStore } from '@/stores/sesion'
+import { iniciarSesion, restablecerContrasena, solicitarRecuperacion } from '@/api/acceso'
+import type { CredencialesIngreso, EstadoIngreso, PantallaAcceso } from '@/types/acceso'
+import type { ErrorApi } from '@/types/api'
 import '@/assets/acceso.css'
 const route = useRoute()
 const router = useRouter()
 const control = inject(controlSesionKey, null)
+const sesion = useSesionStore()
 const comprobando = ref(false)
-const disponibilidad = ref('')
+const enviando = ref(false)
+const respuesta = ref<{ texto: string; error: boolean } | null>(null)
+const vista = ref<'correo-enviado' | 'clave-actualizada' | 'enlace-invalido' | null>(null)
+const textoCorreo = ref('')
+// El token del enlace vive solo aquí: no pasa por el store, el almacenamiento ni la URL.
+const tokenRestablecer = ref('')
+const formIngreso = ref<InstanceType<typeof FormularioIngreso>>()
+const formRecuperacion = ref<InstanceType<typeof FormularioRecuperacion>>()
+const formClave = ref<InstanceType<typeof FormularioClave>>()
 const revision = ref<HTMLDetailsElement>()
 const raiz = ref<HTMLDivElement>()
 const revisando = computed(() => import.meta.env.DEV && route.query.revision === '1')
@@ -29,6 +41,8 @@ const pantallas: { valor: PantallaAcceso; nombre: string }[] = [
 const pantalla = computed<PantallaAcceso | 'no-encontrada'>(() => {
   if (revisando.value)
     return pantallas.find((p) => p.valor === route.query.pantalla)?.valor || 'ingreso'
+  if (vista.value) return vista.value
+  if (route.name === 'restablecer' && !tokenRestablecer.value) return 'enlace-invalido'
   return (
     (
       {
@@ -51,7 +65,7 @@ const motivos: Record<string, string> = {
 }
 const aviso = computed(
   () =>
-    disponibilidad.value ||
+    respuesta.value?.texto ||
     motivos[String(route.query.motivo)] ||
     (revisando.value
       ? {
@@ -62,7 +76,7 @@ const aviso = computed(
             'El usuario o la contraseña no son correctos. Revisa tus datos e intenta de nuevo.',
           bloqueado:
             'Tu cuenta está bloqueada por varios intentos fallidos. Podrás volver a intentarlo en 15 minutos.',
-          inactiva: 'Tu cuenta está inactiva. Contacta con quien te entregó el acceso.',
+          inactiva: 'Cuenta inactiva, contacta al gerente.',
           'sin-conexion':
             'No pudimos conectar. Lo que escribiste sigue aquí; revisa tu conexión y vuelve a intentar.',
           vencida: 'Tu sesión terminó. Vuelve a ingresar para continuar donde estabas.',
@@ -70,7 +84,9 @@ const aviso = computed(
       : ''),
 )
 const errorIngreso = computed(
-  () => revisando.value && ['incorrecto', 'bloqueado', 'inactiva'].includes(estado.value),
+  () =>
+    !!respuesta.value?.error ||
+    (revisando.value && ['incorrecto', 'bloqueado', 'inactiva'].includes(estado.value)),
 )
 const mensaje = computed(
   () =>
@@ -78,7 +94,8 @@ const mensaje = computed(
       'correo-enviado': {
         titulo: 'Revisa tu correo.',
         texto:
-          'Si el correo está registrado, recibirás un enlace para cambiar tu contraseña. Revisa también el correo no deseado.',
+          textoCorreo.value ||
+          'Si el usuario existe y tiene un correo registrado, te enviamos un enlace para restablecer la contraseña.',
         accion: 'Volver al acceso',
         destino: 'ingreso' as const,
       },
@@ -91,7 +108,7 @@ const mensaje = computed(
       'enlace-invalido': {
         titulo: 'Necesitas un nuevo enlace.',
         texto:
-          'Este enlace venció o ya fue utilizado. Puedes solicitar otro para recuperar el acceso.',
+          'Este enlace no es válido, venció o ya fue utilizado. Puedes solicitar otro para recuperar el acceso.',
         accion: 'Solicitar otro enlace',
         destino: 'recuperar' as const,
       },
@@ -99,7 +116,7 @@ const mensaje = computed(
         titulo: 'Este espacio no es el tuyo.',
         texto:
           'Tu cuenta no tiene permiso para abrir esta página. Puedes volver al espacio que te corresponde.',
-        accion: control?.sesion.rol ? 'Volver a mi espacio' : 'Volver al acceso',
+        accion: sesion.rol ? 'Volver a mi espacio' : 'Volver al acceso',
         destino: 'ingreso' as const,
       },
       'no-encontrada': {
@@ -114,16 +131,117 @@ const mensaje = computed(
     ],
 )
 function ir(destino: PantallaAcceso) {
+  vista.value = null
   if (revisando.value)
     void router.push({ name: 'login', query: { revision: '1', pantalla: destino } })
   else void router.push({ name: destino === 'ingreso' ? 'login' : destino })
 }
-function pendiente() {
-  disponibilidad.value = 'Esta opción estará disponible pronto.'
+function soloRevision(): boolean {
+  if (!revisando.value) return false
+  respuesta.value = { texto: 'Revisión visual: no se envió nada.', error: false }
+  return true
 }
+function mostrar(texto: string) {
+  respuesta.value = { texto, error: true }
+}
+async function ingresar(datos: CredencialesIngreso) {
+  if (enviando.value || soloRevision()) return
+  enviando.value = true
+  respuesta.value = null
+  let despues: (() => void) | undefined
+  try {
+    const nueva = await iniciarSesion(datos)
+    sesion.iniciar(nueva.token, nueva.usuario)
+    sesion.confirmada = nueva.token
+    await router.replace(retornoAutorizado(router, route.query.redirect, nueva.usuario.rol))
+  } catch (fallo) {
+    const error = fallo as ErrorApi
+    if (error.code === 'VALIDACION' && ['username', 'contrasena'].includes(error.field ?? '')) {
+      const campo = error.field === 'username' ? 'username' : 'contrasena'
+      despues = () => formIngreso.value?.marcarError(campo, error.detail)
+    } else {
+      mostrar(error.detail || 'No pudimos abrir tu sesión. Intenta de nuevo.')
+      if (error.code === 'CREDENCIALES_INVALIDAS')
+        despues = () => formIngreso.value?.pedirContrasena()
+    }
+  } finally {
+    enviando.value = false
+  }
+  if (despues) {
+    await nextTick()
+    despues()
+  }
+}
+async function recuperar(username: string) {
+  if (enviando.value || soloRevision()) return
+  enviando.value = true
+  respuesta.value = null
+  let despues: (() => void) | undefined
+  try {
+    textoCorreo.value = await solicitarRecuperacion(username)
+    vista.value = 'correo-enviado'
+  } catch (fallo) {
+    const error = fallo as ErrorApi
+    if (error.code === 'VALIDACION' && error.field === 'username')
+      despues = () => formRecuperacion.value?.marcarError(error.detail)
+    else mostrar(error.detail)
+  } finally {
+    enviando.value = false
+  }
+  if (despues) {
+    await nextTick()
+    despues()
+  }
+}
+async function guardarClave(nueva: string) {
+  if (enviando.value || soloRevision()) return
+  enviando.value = true
+  respuesta.value = null
+  let despues: (() => void) | undefined
+  try {
+    await restablecerContrasena(tokenRestablecer.value, nueva)
+    tokenRestablecer.value = ''
+    vista.value = 'clave-actualizada'
+  } catch (fallo) {
+    const error = fallo as ErrorApi
+    if (error.code === 'TOKEN_INVALIDO') {
+      tokenRestablecer.value = ''
+      vista.value = 'enlace-invalido'
+    } else if (
+      error.code === 'CONTRASENA_REPETIDA' ||
+      (error.code === 'VALIDACION' && error.field === 'nueva_contrasena')
+    )
+      despues = () => formClave.value?.marcarError('nueva', error.detail)
+    else mostrar(error.detail)
+  } finally {
+    enviando.value = false
+  }
+  if (despues) {
+    await nextTick()
+    despues()
+  }
+}
+watch(
+  () => route.name,
+  () => {
+    vista.value = null
+  },
+)
+// Se lee el token del enlace y se quita de la dirección para que no quede en el historial.
+watch(
+  () => [route.name, route.params.token] as const,
+  ([nombre, token]) => {
+    if (nombre !== 'restablecer') tokenRestablecer.value = ''
+    else if (typeof token === 'string' && token) {
+      tokenRestablecer.value = token
+      void router.replace({ name: 'restablecer' })
+    }
+  },
+  { immediate: true },
+)
 function volver() {
-  if (pantalla.value === 'sin-permiso' && control?.sesion.rol) {
-    void router.push(retornoAutorizado(router, undefined, control.sesion.rol))
+  if (pantalla.value === 'sin-permiso' && sesion.rol) {
+    void router.push(retornoAutorizado(router, undefined, sesion.rol))
   } else if (mensaje.value) ir(mensaje.value.destino)
 }
 async function reintentar() {
@@ -139,7 +257,7 @@ async function reintentar() {
   }
 }
 watch(pantalla, async () => {
-  disponibilidad.value = ''
+  respuesta.value = null
   estado.value = 'normal'
   if (revision.value) revision.value.open = false
   await nextTick()
@@ -161,10 +279,11 @@ watch(pantalla, async () => {
           />
         </section>
         <FormularioIngreso
-          :cargando="comprobando || (revisando && estado === 'cargando')"
+          ref="formIngreso"
+          :cargando="comprobando || enviando || (revisando && estado === 'cargando')"
           :bloqueado="revisando && (estado === 'bloqueado' || estado === 'inactiva')"
           :mostrar-vacios="revisando && estado === 'vacio'"
-          @enviar="pendiente"
+          @enviar="ingresar"
           @recuperar="ir('recuperar')"
         >
           <template #aviso
@@ -176,7 +295,7 @@ watch(pantalla, async () => {
             >
               {{ aviso }}
               <button
-                v-if="control?.sesion.token"
+                v-if="sesion.token"
                 class="enlace-acceso"
                 type="button"
                 :disabled="comprobando"
@@ -193,14 +312,24 @@ watch(pantalla, async () => {
           <h1>Volvamos a tu espacio.</h1>
           <p>Te enviaremos un enlace para elegir una nueva contraseña.</p>
         </section>
-        <FormularioRecuperacion @enviar="pendiente" @volver="ir('ingreso')" />
+        <FormularioRecuperacion
+          ref="formRecuperacion"
+          :cargando="enviando"
+          @enviar="recuperar"
+          @volver="ir('ingreso')"
+        />
       </template>
       <template v-else-if="pantalla === 'restablecer'">
         <section class="hero-secundario">
           <h1>Una nueva contraseña. El mismo espacio.</h1>
           <p>Elige una distinta de la actual y de tus últimas tres contraseñas.</p>
         </section>
-        <FormularioClave @enviar="pendiente" @volver="ir('ingreso')" />
+        <FormularioClave
+          ref="formClave"
+          :cargando="enviando"
+          @enviar="guardarClave"
+          @volver="ir('ingreso')"
+        />
       </template>
       <section v-else-if="mensaje" class="mensaje-diseno">
         <h1>{{ mensaje.titulo }}</h1>
@@ -214,19 +343,24 @@ watch(pantalla, async () => {
             class="enlace-acceso"
             @click="ir('recuperar')"
           >
-            Usar otro correo</button
+            Probar con otro usuario</button
           ><button
-            v-else-if="pantalla === 'sin-permiso' && control?.sesion.token"
+            v-else-if="pantalla === 'sin-permiso' && sesion.token"
             type="button"
             class="enlace-acceso"
-            @click="control?.sesion.cerrar()"
+            @click="sesion.cerrar()"
           >
             Cerrar sesión
           </button>
         </div>
       </section>
-      <p v-if="disponibilidad && pantalla !== 'ingreso'" class="aviso-acceso" role="status">
-        {{ disponibilidad }}
+      <p
+        v-if="respuesta && pantalla !== 'ingreso'"
+        class="aviso-acceso"
+        :class="{ 'aviso-acceso--error': respuesta.error }"
+        :role="respuesta.error ? 'alert' : 'status'"
+      >
+        {{ respuesta.texto }}
       </p>
       <template v-if="revisando" #pie>
         <details ref="revision" class="selector-revision">

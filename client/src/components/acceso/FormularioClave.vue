@@ -4,26 +4,15 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import CampoAcceso from './CampoAcceso.vue'
+import { esquemaContrasenaNueva, requisitosContrasena } from '@/config/reglas'
 const props = defineProps<{ cargando?: boolean }>()
 const emit = defineEmits<{ enviar: [contrasena: string]; volver: [] }>()
-const reglas = [
-  { etiqueta: '8 caracteres', cumple: (s: string) => s.length >= 8 },
-  { etiqueta: 'Mayúscula', cumple: (s: string) => /[A-ZÁÉÍÓÚÑ]/.test(s) },
-  { etiqueta: 'Minúscula', cumple: (s: string) => /[a-záéíóúñ]/.test(s) },
-  { etiqueta: 'Número', cumple: (s: string) => /[0-9]/.test(s) },
-  { etiqueta: 'Símbolo', cumple: (s: string) => /[^\p{L}\p{N}\s]/u.test(s) },
-]
-const { values, handleSubmit } = useForm({
+const { values, handleSubmit, setErrors } = useForm({
   initialValues: { nueva: '', confirmar: '' },
   validationSchema: toTypedSchema(
     z
       .object({
-        nueva: z
-          .string()
-          .refine(
-            (valor) => reglas.every((r) => r.cumple(valor)),
-            'Revisa los requisitos de tu nueva contraseña.',
-          ),
+        nueva: esquemaContrasenaNueva,
         confirmar: z.string().min(1, 'Confirma la contraseña.'),
       })
       .refine((v) => v.nueva === v.confirmar, {
@@ -33,10 +22,27 @@ const { values, handleSubmit } = useForm({
   ),
 })
 const requisitos = computed(() =>
-  reglas.map((regla) => ({ etiqueta: regla.etiqueta, cumple: regla.cumple(values.nueva || '') })),
+  requisitosContrasena.map((regla) => ({
+    etiqueta: regla.etiqueta,
+    cumple: regla.cumple(values.nueva || ''),
+  })),
 )
-const enviar = handleSubmit(({ nueva }) => {
-  if (!props.cargando) emit('enviar', nueva)
+const enfocar = (campo: string) =>
+  document.querySelector<HTMLInputElement>(`input[name="${campo}"]`)?.focus()
+const enviar = handleSubmit(
+  ({ nueva }) => {
+    if (!props.cargando) emit('enviar', nueva)
+  },
+  ({ errors }) => {
+    const campo = ['nueva', 'confirmar'].find((nombre) => nombre in errors)
+    if (campo) enfocar(campo)
+  },
+)
+defineExpose({
+  marcarError(campo: 'nueva' | 'confirmar', mensaje: string) {
+    setErrors({ [campo]: mensaje })
+    enfocar(campo)
+  },
 })
 </script>
 <template>

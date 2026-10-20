@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, StringConstraints
 
-from app.core.reglas import ContrasenaNueva
+from app.core.reglas import ContrasenaNueva, Username
 
 
 class IngresoEntrada(BaseModel):
@@ -28,9 +28,9 @@ class SesionSalida(BaseModel):
 
 
 class SolicitudRecuperacion(BaseModel):
-    """Correo para solicitar el restablecimiento de contraseña."""
+    """Usuario que pide restablecer su contraseña. El enlace va al correo registrado."""
 
-    correo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    username: Username
 
 
 class RestablecerContrasenaEntrada(BaseModel):

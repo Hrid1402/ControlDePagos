@@ -5,7 +5,7 @@ Errores del login: 401 CREDENCIALES_INVALIDAS (genérico), 423 CUENTA_BLOQUEADA 
 restantes en detail y 403 CUENTA_INACTIVA.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 
 from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
 from app.core.seguridad import crear_token
@@ -18,7 +18,13 @@ from app.schemas.acceso import (
     SolicitudRecuperacion,
     UsuarioSesion,
 )
-from app.services.acceso import iniciar_sesion, restablecer_contrasena, solicitar_recuperacion
+from app.services.acceso import (
+    MENSAJE_RECUPERACION_GENERICO,
+    enviar_recuperacion,
+    iniciar_sesion,
+    restablecer_contrasena,
+    solicitar_recuperacion,
+)
 from app.services.auditoria import nombre_de
 
 router = APIRouter(prefix="/auth", tags=["acceso"])
@@ -54,10 +60,14 @@ def yo(usuario: UsuarioActual) -> UsuarioSesion:
 
 
 @router.post("/recuperar-contrasena")
-def recuperar(datos: SolicitudRecuperacion, db: SesionDb, origen: OrigenSolicitud) -> MensajeSalida:
-    """Envía un token de restablecimiento de contraseña al correo registrado."""
-    detalle = solicitar_recuperacion(db, datos.correo, origen)
-    return MensajeSalida(detail=detalle)
+def recuperar(datos: SolicitudRecuperacion, db: SesionDb, tareas: BackgroundTasks) -> MensajeSalida:
+    """Envía el enlace de restablecimiento al correo del usuario si puede recibirlo. La respuesta
+    es siempre la misma y el correo sale después de responder: no revela si el usuario existe, está
+    activo o tiene correo, ni por el mensaje ni por el tiempo."""
+    correo = solicitar_recuperacion(db, datos.username)
+    if correo is not None:
+        tareas.add_task(enviar_recuperacion, correo)
+    return MensajeSalida(detail=MENSAJE_RECUPERACION_GENERICO)
 
 
 @router.post("/restablecer-contrasena")

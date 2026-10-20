@@ -1,17 +1,20 @@
 import hashlib
+import logging
 import secrets
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.seguridad import hashear_contrasena
 from app.main import app
-from app.models import Auditoria, HistorialContrasena, TokenRestablecimiento
+from app.models import Auditoria, HistorialContrasena, TokenRestablecimiento, Usuario
+from app.services.acceso import MENSAJE_RECUPERACION_GENERICO
 from tests.conftest import DosGerentes
 
 SOLICITAR = "/api/v1/auth/recuperar-contrasena"
@@ -40,47 +43,138 @@ def equipos(db: Session, dos_gerentes: DosGerentes) -> DosGerentes:
     return dos_gerentes
 
 
-def test_solicitar_recuperacion_con_correo_existente_crea_token(
-    cliente: TestClient, db: Session, equipos: DosGerentes
+@pytest.fixture
+def correos(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str]]:
+    """Correos que el servicio intentó enviar: (destinatario, asunto, cuerpo)."""
+    enviados: list[tuple[str, str, str]] = []
+
+    def capturar(destinatario: str, asunto: str, cuerpo: str) -> bool:
+        enviados.append((destinatario, asunto, cuerpo))
+        return True
+
+    monkeypatch.setattr("app.services.acceso.enviar_correo", capturar)
+    return enviados
+
+
+def tokens(db: Session) -> list[TokenRestablecimiento]:
+    return list(db.scalars(select(TokenRestablecimiento)).all())
+
+
+def test_solicitar_recuperacion_por_usuario_crea_token_y_envia_un_correo(
+    cliente: TestClient, db: Session, equipos: DosGerentes, correos: list[tuple[str, str, str]]
 ) -> None:
     gerente = equipos.uno.gerente
-    r = cliente.post(SOLICITAR, json={"correo": gerente.correo})
+    r = cliente.post(SOLICITAR, json={"username": gerente.username})
     assert r.status_code == 200
-    assert "Si el correo está registrado" in r.json()["detail"]
+    assert r.json() == {"detail": MENSAJE_RECUPERACION_GENERICO}
 
-    token_db = db.scalar(
-        select(TokenRestablecimiento).where(TokenRestablecimiento.usuario_id == gerente.id)
-    )
-    assert token_db is not None
+    [token_db] = tokens(db)
+    assert token_db.usuario_id == gerente.id
     assert token_db.usado_en is None
-    assert token_db.expira_en > datetime.now(UTC)
+    restante = token_db.expira_en - datetime.now(UTC)
+    assert timedelta(minutes=29) < restante <= timedelta(minutes=30)
+    [(destinatario, _, cuerpo)] = correos
+    assert destinatario == gerente.correo
+    [enlace] = [linea for linea in cuerpo.splitlines() if linea.startswith("http")]
+    base, _, token = enlace.rpartition("/restablecer/")
+    assert base == settings.url_cliente.rstrip("/")
+    assert hashlib.sha256(token.encode()).hexdigest() == token_db.token_hash
+    assert "30 minutos" in cuerpo
 
 
-def test_solicitar_recuperacion_con_correo_inexistente_responde_generico(
-    cliente: TestClient, db: Session
+def test_solicitar_recuperacion_acepta_mayusculas_y_espacios(
+    cliente: TestClient, db: Session, equipos: DosGerentes, correos: list[tuple[str, str, str]]
 ) -> None:
-    r = cliente.post(SOLICITAR, json={"correo": "nadie@example.com"})
+    gerente = equipos.uno.gerente
+    r = cliente.post(SOLICITAR, json={"username": f"  {gerente.username.upper()}  "})
     assert r.status_code == 200
-    assert "Si el correo está registrado" in r.json()["detail"]
-
-    total = len(db.scalars(select(TokenRestablecimiento)).all())
-    assert total == 0
+    assert [c[0] for c in correos] == [gerente.correo]
+    assert len(tokens(db)) == 1
 
 
-def test_solicitar_recuperacion_con_cuenta_inactiva_no_genera_token(
-    cliente: TestClient, db: Session, equipos: DosGerentes
+def sin_correo(usuario: Usuario) -> None:
+    usuario.correo = None
+
+
+def inactivo(usuario: Usuario) -> None:
+    usuario.estado = "inactiva"
+
+
+def eliminado(usuario: Usuario) -> None:
+    usuario.eliminado_en = datetime.now(UTC)
+
+
+@pytest.mark.parametrize("preparar", [None, inactivo, eliminado, sin_correo])
+def test_solicitar_recuperacion_responde_igual_y_no_envia_si_no_puede(
+    cliente: TestClient,
+    db: Session,
+    equipos: DosGerentes,
+    correos: list[tuple[str, str, str]],
+    preparar: Callable[[Usuario], None] | None,
 ) -> None:
     asistente = equipos.uno.asistente
-    asistente.estado = "inactiva"
-    db.flush()
+    username = "nadie.existe" if preparar is None else asistente.username
+    if preparar is not None:
+        preparar(asistente)
+        db.flush()
+    valido = cliente.post(SOLICITAR, json={"username": equipos.uno.gerente.username})
+    assert len(correos) == 1
+    correos.clear()
 
-    r = cliente.post(SOLICITAR, json={"correo": asistente.correo})
+    r = cliente.post(SOLICITAR, json={"username": username})
+    assert r.status_code == valido.status_code == 200
+    assert r.json() == valido.json()
+    assert correos == []
+    assert [t.usuario_id for t in tokens(db)] == [equipos.uno.gerente.id]
+
+
+def test_solicitar_recuperacion_no_guarda_el_usuario_escrito(
+    cliente: TestClient,
+    db: Session,
+    correos: list[tuple[str, str, str]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    antes = db.scalar(select(func.count()).select_from(Auditoria))
+    with caplog.at_level(logging.DEBUG):
+        r = cliente.post(SOLICITAR, json={"username": "Secreto.Escrito"})
     assert r.status_code == 200
+    assert "secreto.escrito" not in caplog.text.lower()
+    assert db.scalar(select(func.count()).select_from(Auditoria)) == antes
+    assert tokens(db) == []
 
-    token_db = db.scalar(
-        select(TokenRestablecimiento).where(TokenRestablecimiento.usuario_id == asistente.id)
-    )
-    assert token_db is None
+
+@pytest.mark.parametrize("cuerpo", [{"correo": "nadie@example.com"}, {}, {"username": "ab"}])
+def test_solicitar_recuperacion_valida_el_usuario(
+    cliente: TestClient, cuerpo: dict[str, str]
+) -> None:
+    r = cliente.post(SOLICITAR, json=cuerpo)
+    assert r.status_code == 422
+    assert r.json()["code"] == "VALIDACION"
+    assert r.json()["field"] == "username"
+
+
+def test_un_fallo_de_envio_no_cambia_la_respuesta_ni_registra_datos(
+    cliente: TestClient,
+    db: Session,
+    equipos: DosGerentes,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    gerente = equipos.uno.gerente
+    assert gerente.correo is not None
+
+    def servidor_caido(*_: object, **__: object) -> None:
+        raise OSError(f"no se pudo entregar a {gerente.correo}")
+
+    monkeypatch.setattr("app.core.email.smtplib.SMTP", servidor_caido)
+    with caplog.at_level(logging.DEBUG):
+        r = cliente.post(SOLICITAR, json={"username": gerente.username})
+    assert r.status_code == 200
+    assert r.json() == {"detail": MENSAJE_RECUPERACION_GENERICO}
+    texto = caplog.text.lower()
+    assert "no se envió el correo de recuperación" in texto
+    assert gerente.username.lower() not in texto
+    assert gerente.correo.lower() not in texto
 
 
 def test_restablecer_contrasena_exitoso(
@@ -267,3 +361,21 @@ def test_restablecer_no_permite_reutilizar_contrasena_actual_ni_ultimas_3(
 
     r3 = cliente.post(RESTABLECER, json={"token": token_3, "nueva_contrasena": clave_vieja_4})
     assert r3.status_code == 200
+
+
+def test_el_enlace_del_correo_restablece_la_contrasena(
+    cliente: TestClient, db: Session, equipos: DosGerentes, correos: list[tuple[str, str, str]]
+) -> None:
+    gerente = equipos.uno.gerente
+    cliente.post(SOLICITAR, json={"username": gerente.username})
+    [(_, _, cuerpo)] = correos
+    token = next(
+        linea.rpartition("/restablecer/")[2]
+        for linea in cuerpo.splitlines()
+        if "/restablecer/" in linea
+    )
+    r = cliente.post(RESTABLECER, json={"token": token, "nueva_contrasena": "Otra-clave-nueva-7"})
+    assert r.status_code == 200
+    r = cliente.post(RESTABLECER, json={"token": token, "nueva_contrasena": "Otra-clave-nueva-8"})
+    assert r.status_code == 400
+    assert r.json()["code"] == "TOKEN_INVALIDO"
