@@ -7,15 +7,14 @@ quien llama y el evento "notificacion" sale por WebSocket solo después de ese c
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.dependencias import gerente_de
 from app.core.eventos import Evento, TipoEvento, publicar_tras_commit
+from app.core.tiempo import ahora_lima, zona_horaria
 from app.models import Deuda, Notificacion, PreferenciaNotificacion, Usuario
 from app.schemas.notificaciones import NotificacionSalida
 
@@ -48,7 +47,7 @@ def en_silencio(usuario: Usuario, ahora: datetime) -> bool:
     desde, hasta = usuario.silencio_desde, usuario.silencio_hasta
     if desde is None or hasta is None or desde == hasta:
         return False
-    hora = ahora.astimezone(ZoneInfo(settings.timezone)).time()
+    hora = ahora.astimezone(zona_horaria()).time()
     if desde < hasta:
         return desde <= hora < hasta
     return hora >= desde or hora < hasta
@@ -114,7 +113,7 @@ def notificar(
     if notificacion is None:
         return None
 
-    aviso = urgente or not en_silencio(usuario, ahora or datetime.now(ZoneInfo(settings.timezone)))
+    aviso = urgente or not en_silencio(usuario, ahora or ahora_lima())
     datos = NotificacionSalida.model_validate(notificacion).model_dump(mode="json")
     publicar_tras_commit(db, usuario.id, Evento(TipoEvento.NOTIFICACION, {**datos, "aviso": aviso}))
     return notificacion
