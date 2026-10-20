@@ -20,10 +20,11 @@ from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.tiempo import ahora_lima, zona_horaria
 from app.models import Deuda, Limite, Notificacion, Servicio, SolicitudAprobacion, Usuario
-from app.services.auditoria import Accion, nombre_de, registrar_auditoria
+from app.schemas.limites import ConsumoMesSalida, LimitesConsumoSalida
+from app.services.auditoria import Accion, diferencias, nombre_de, registrar_auditoria
 from app.services.notificaciones import TipoNotificacion, notificar
-from app.services.pagos import bloquear_deuda
-from app.services.saldo import aplicado_de
+from app.services.pagos import bloquear_deuda, bloquear_limite
+from app.services.saldo import aplicado_de, consumo_mes_desglose
 
 DECISIONES = ("aprobada", "rechazada")
 LARGO_MOTIVO = 300
@@ -68,6 +69,51 @@ def fijar_limite(
         limite.mensual = mensual
 
     db.flush()
+    return limite
+
+
+def limites_con_consumo(
+    db: Session, gerente: Usuario, ahora: datetime | None = None
+) -> LimitesConsumoSalida:
+    """Límites del gerente y su consumo PEN del mes en Lima (CA01, CA03, CA04 y CA11)."""
+    momento = ahora or ahora_lima()
+    limite = obtener_limite(db, gerente.id)
+    validado, reservado = consumo_mes_desglose(db, gerente.id, momento)
+    return LimitesConsumoSalida(
+        por_pago=limite.por_pago if limite else None,
+        mensual=limite.mensual if limite else None,
+        actualizado_en=limite.actualizado_en if limite else None,
+        mes=momento.astimezone(zona_horaria()).strftime("%Y-%m"),
+        consumo=ConsumoMesSalida(
+            validado=validado, reservado=reservado, total=validado + reservado
+        ),
+    )
+
+
+def actualizar_limites(
+    db: Session,
+    gerente: Usuario,
+    por_pago: Decimal | None,
+    mensual: Decimal | None,
+    origen: Origen,
+) -> Limite:
+    """Fija los límites y registra el cambio en el historial. Las solicitudes ya enviadas guardan
+    su propio monto y no cambian (CA12). Bloquea la fila igual que el inicio de pago, para que un
+    pago simultáneo vea los límites de antes o los de después, nunca una mezcla."""
+    centimos = Decimal("0.01")
+    por_pago = por_pago.quantize(centimos) if por_pago is not None else None
+    mensual = mensual.quantize(centimos) if mensual is not None else None
+    actual = bloquear_limite(db, gerente.id)
+    anterior = {
+        "por_pago": actual.por_pago if actual else None,
+        "mensual": actual.mensual if actual else None,
+    }
+    limite = fijar_limite(db, gerente.id, por_pago, mensual)
+    cambios = diferencias(anterior, {"por_pago": limite.por_pago, "mensual": limite.mensual})
+    if cambios:
+        registrar_auditoria(
+            db, gerente, Accion.LIMITES_ACTUALIZADOS, "limite", None, cambios, origen=origen
+        )
     return limite
 
 

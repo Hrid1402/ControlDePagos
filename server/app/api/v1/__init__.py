@@ -9,6 +9,7 @@ from app.api.v1 import (
     categorias,
     deudas,
     empresas,
+    limites,
     me,
     ordenes,
     pagos,
@@ -29,6 +30,7 @@ router.include_router(calendario.router)
 router.include_router(categorias.router)
 router.include_router(deudas.router)
 router.include_router(empresas.router)
+router.include_router(limites.router)
 router.include_router(me.router)
 router.include_router(ordenes.router)
 router.include_router(pagos.router)

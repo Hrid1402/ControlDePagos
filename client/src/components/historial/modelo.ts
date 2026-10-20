@@ -134,6 +134,11 @@ export const ACCIONES: Record<string, Accion> = {
   },
   aprobacion_aprobada: { grupo: 'pagos', frase: 'aprobó un pago', etiqueta: 'Pago aprobado' },
   aprobacion_rechazada: { grupo: 'pagos', frase: 'rechazó un pago', etiqueta: 'Pago rechazado' },
+  limites_actualizados: {
+    grupo: 'pagos',
+    frase: 'cambió los límites de pago',
+    etiqueta: 'Cambio de límites',
+  },
   orden_vista: { grupo: 'ordenes', frase: 'vio una orden urgente', etiqueta: 'Orden vista' },
   orden_aceptada: {
     grupo: 'ordenes',
@@ -285,6 +290,8 @@ const CAMPOS: Record<string, string> = {
   monto: 'Monto',
   moneda: 'Moneda',
   saldo: 'Saldo',
+  por_pago: 'Límite por pago',
+  mensual: 'Límite mensual',
   motivo: 'Motivo',
   estado: 'Estado',
   estado_anterior: 'Estado anterior',
