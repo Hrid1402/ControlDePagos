@@ -9,6 +9,7 @@ const dia: DiaCalendario = {
   deudas: [
     {
       id: 'deuda-1',
+      servicio_id: 'servicio-1',
       nombre: 'Servicio de agua',
       estado: 'pendiente',
       monto: '120.50',
@@ -22,7 +23,10 @@ const dia: DiaCalendario = {
   totales_proyectados: {},
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 
 describe('diseño del calendario', () => {
   it('inicia en lista en celular y permite abrir una deuda desde el detalle', async () => {
@@ -30,10 +34,9 @@ describe('diseño del calendario', () => {
     const vista = mount(CalendarioSuperficie, { props: { dias: [dia] } })
     await nextTick()
     expect(vista.get('button[aria-pressed="true"].activa').text()).toBe('Lista')
-    await vista.get('button.fila-fecha').trigger('click')
+    expect(vista.find('.fc-listMonth-view').exists()).toBe(true)
     expect(vista.text()).toContain('Servicio de agua')
-    expect(vista.text()).toContain('S/ 120.50')
-    await vista.get('button.deuda').trigger('click')
+    await vista.get('.fc-list-event').trigger('click')
     expect(vista.emitted('abrirDeuda')?.[0]).toEqual(['deuda-1'])
   })
 
@@ -43,5 +46,29 @@ describe('diseño del calendario', () => {
     expect(vista.get('[role="alert"]').text()).toContain('No pudimos cargar el calendario')
     await vista.get('[role="alert"] button').trigger('click')
     expect(vista.emitted('reintentar')).toHaveLength(1)
+  })
+
+  it('usa vistas reales y consulta el rango visible al navegar de diciembre a enero', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 11, 15))
+    const vista = mount(CalendarioSuperficie)
+    await nextTick()
+    expect(vista.find('.fc-dayGridMonth-view').exists()).toBe(true)
+    expect(vista.emitted('consultar')?.length).toBeGreaterThan(0)
+    const consultasIniciales = vista.emitted('consultar')?.length
+    await vista.setProps({ dias: [dia] })
+    expect(vista.emitted('consultar')?.length).toBe(consultasIniciales)
+    await vista.get('button[aria-label="Periodo siguiente"]').trigger('click')
+    expect(vista.emitted('consultar')?.slice(-1)[0]?.[0]).toMatchObject({
+      desde: '2026-12-28',
+      hasta: '2027-01-31',
+    })
+    await vista.get('.vistas button:nth-child(2)').trigger('click')
+    expect(vista.find('.fc-dayGridWeek-view').exists()).toBe(true)
+    await vista.get('.vistas button:nth-child(3)').trigger('click')
+    expect(vista.find('.fc-listMonth-view').exists()).toBe(true)
+    await vista.get('#calendario-estado').setValue('pagada')
+    expect(vista.emitted('consultar')?.slice(-1)[0]?.[0]).toMatchObject({ estado: 'pagada' })
   })
 })

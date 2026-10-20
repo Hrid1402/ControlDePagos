@@ -20,6 +20,12 @@ import CampoTexto from '@/components/formularios/CampoTexto.vue'
 import EstadoSesion from '@/components/EstadoSesion.vue'
 import EspacioLayout from '@/layouts/EspacioLayout.vue'
 
+vi.mock('@/api/calendario', () => ({
+  consultarCalendario: vi.fn().mockResolvedValue([]),
+  listarCategoriasCalendario: vi.fn().mockResolvedValue([]),
+  exportarCalendario: vi.fn(),
+}))
+
 const montados: VueWrapper[] = []
 const limpiezas: (() => void)[] = []
 const usuario = { id: '1', nombre: 'Ana', rol: 'gerente' as const }
@@ -171,14 +177,13 @@ describe('espacios y avisos de sesión', () => {
       expect(wrapper.get('img').attributes('src')).toContain('wordmark-white.svg')
       const pestanas = wrapper.findAll('nav[aria-label="Secciones"] a').map((a) => a.text())
       expect(pestanas).toEqual(expect.arrayContaining([...etiquetas]))
-      // La sección sin pantalla todavía lo dice; no muestra datos de ejemplo.
+      // La sección de inicio sin pantalla todavía lo dice; no muestra datos de ejemplo.
       expect(wrapper.get('main h1').text()).toBe(etiquetas[0])
       expect(wrapper.text()).toContain('Esta sección se habilitará')
       expect(wrapper.get('nav[aria-label="Secciones"] a.activa').text()).toBe(etiquetas[0])
 
       await wrapper.findAll('nav[aria-label="Secciones"] a')[1]!.trigger('click')
-      await flushPromises()
-      expect(router.currentRoute.value.name).toBe(`${rol}-${segunda}`)
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe(`${rol}-${segunda}`))
 
       await elegirEnCuenta(wrapper, 'Mi cuenta')
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe(`${rol}-cuenta`))

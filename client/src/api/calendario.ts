@@ -46,9 +46,12 @@ export async function listarCategoriasCalendario(): Promise<CategoriaCalendario[
   let pagina = 1
   let total = 0
   do {
-    const { data } = await http.get<{ items: ServicioConCategoria[]; total: number }>('/servicios', {
-      params: { estado: 'todos', page: pagina, size: 100 },
-    })
+    const { data } = await http.get<{ items: ServicioConCategoria[]; total: number }>(
+      '/servicios',
+      {
+        params: { estado: 'todos', page: pagina, size: 100 },
+      },
+    )
     total = data.total
     for (const servicio of data.items) categorias.set(servicio.categoria.id, servicio.categoria)
     if (!data.items.length) break
