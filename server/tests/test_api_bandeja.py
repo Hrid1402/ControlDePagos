@@ -267,3 +267,16 @@ def test_paginas_de_uno_sin_repetidos_ni_omitidos(
         p["contadores"] == {"por_pagar": 3, "por_validar": 1, "rechazadas": 0} for p in paginas
     )
     assert [p["page"] for p in paginas] == [1, 2, 3, 4]
+
+
+def test_la_deuda_esperando_recibo_sin_monto_no_aparece_ni_cuenta(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    pendiente = nueva_deuda(db, equipo.gerente)
+    nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
+
+    cuerpo = ver(cliente, equipo.asistente)
+
+    assert ids(cuerpo) == [str(pendiente.id)]
+    assert cuerpo["total"] == 1

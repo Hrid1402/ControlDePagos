@@ -53,10 +53,11 @@ def aplicado_de(db: Session, deuda_id: uuid.UUID) -> Decimal:
     return db.scalar(select(aplicado_validado(Deuda.id)).where(Deuda.id == deuda_id)) or Decimal(0)
 
 
-def saldo_de(db: Session, deuda: Deuda) -> Decimal:
-    """Saldo pendiente de la deuda. Sin monto confirmado (esperando recibo) no hay saldo."""
+def saldo_de(db: Session, deuda: Deuda) -> Decimal | None:
+    """Saldo pendiente de la deuda, o None si aún no tiene monto confirmado (esperando recibo):
+    un saldo desconocido nunca se presenta como cero."""
     if deuda.monto is None:
-        return Decimal(0)
+        return None
     return deuda.monto - aplicado_de(db, deuda.id)
 
 

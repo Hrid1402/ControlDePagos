@@ -130,3 +130,27 @@ def test_comprobante_activo_por_reparto_o_por_sugerencia(
     comprobante.deuda_sugerida_id = sugerida.id
     db.flush()
     assert tiene_comprobante_activo(db, sugerida.id) is True
+
+
+def test_la_deuda_esperando_recibo_no_tiene_saldo_ni_es_cero(
+    db: Session, dos_gerentes: DosGerentes
+) -> None:
+    deuda = nueva_deuda(db, dos_gerentes.uno.gerente, monto=None, estado="esperando_recibo")
+    assert saldo_de(db, deuda) is None
+
+    deuda.monto = Decimal("75.00")
+    deuda.estado = "pendiente"
+    assert saldo_de(db, deuda) == Decimal("75.00")
+
+
+def test_la_deuda_sin_monto_no_cuenta_en_el_consumo_del_mes(
+    db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
+    nueva_deuda(db, equipo.gerente, monto=None, estado="anulada")
+    en_proceso = nueva_deuda(db, equipo.gerente, monto="60.00", estado="en_proceso")
+    en_proceso.pago_iniciado_por = equipo.asistente.id
+    db.flush()
+
+    assert consumo_mes_pen(db, equipo.gerente.id, AHORA) == Decimal("60.00")

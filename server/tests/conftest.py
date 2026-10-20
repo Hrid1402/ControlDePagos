@@ -105,7 +105,7 @@ def nueva_categoria(db: Session, gerente: Usuario, tipo: str = "servicio_variabl
 def nueva_deuda(
     db: Session,
     gerente: Usuario,
-    monto: str = "100.00",
+    monto: str | None = "100.00",
     moneda: str = "PEN",
     estado: str = "pendiente",
     fecha_vencimiento: date = date(2026, 10, 25),
@@ -129,7 +129,7 @@ def nueva_deuda(
         gerente_id=gerente.id,
         servicio_id=servicio.id,
         periodo=fecha_vencimiento.replace(day=1),
-        monto=Decimal(monto),
+        monto=None if monto is None else Decimal(monto),
         moneda=moneda,
         estado=estado,
         fecha_vencimiento=fecha_vencimiento,

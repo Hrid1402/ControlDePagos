@@ -111,6 +111,78 @@ def test_la_deuda_rechaza_monto_cero(db: Session) -> None:
         db.flush()
 
 
+ESTADOS_DEUDA = (
+    "esperando_recibo",
+    "pendiente",
+    "esperando_aprobacion",
+    "en_proceso",
+    "por_validar",
+    "pagada_parcial",
+    "pagada",
+    "con_problema",
+    "anulada",
+)
+ESTADOS_SIN_MONTO = ("esperando_recibo", "anulada")
+
+
+@pytest.mark.parametrize("estado", ESTADOS_SIN_MONTO)
+def test_la_deuda_sin_importe_solo_existe_esperando_recibo_o_anulada(
+    db: Session, estado: str
+) -> None:
+    deuda = nueva_deuda(db, crear_gerente(db), monto=None, estado=estado)
+    db.refresh(deuda)
+    assert deuda.monto is None
+
+
+@pytest.mark.parametrize("estado", [e for e in ESTADOS_DEUDA if e not in ESTADOS_SIN_MONTO])
+def test_la_deuda_operativa_exige_monto(db: Session, estado: str) -> None:
+    with pytest.raises(IntegrityError, match="ck_deuda_monto"):
+        nueva_deuda(db, crear_gerente(db), monto=None, estado=estado)
+
+
+@pytest.mark.parametrize("estado", ESTADOS_DEUDA)
+@pytest.mark.parametrize("monto", ["0", "-5.00"])
+def test_ningun_estado_acepta_monto_cero_ni_negativo(db: Session, estado: str, monto: str) -> None:
+    with pytest.raises(IntegrityError, match="ck_deuda_monto"):
+        nueva_deuda(db, crear_gerente(db), monto=monto, estado=estado)
+
+
+def test_esperando_recibo_y_anulada_aceptan_un_monto_positivo(db: Session) -> None:
+    gerente = crear_gerente(db)
+    for estado in ESTADOS_SIN_MONTO:
+        assert nueva_deuda(db, gerente, monto="80.00", estado=estado).monto == Decimal("80.00")
+
+
+def test_una_deuda_anulada_sin_monto_permite_registrar_otra_del_mismo_periodo(
+    db: Session,
+) -> None:
+    gerente = crear_gerente(db)
+    anulada = nueva_deuda(db, gerente, monto=None, estado="anulada")
+    db.add(
+        Deuda(
+            gerente_id=gerente.id,
+            servicio_id=anulada.servicio_id,
+            periodo=anulada.periodo,
+            monto=Decimal("90.00"),
+            fecha_vencimiento=anulada.fecha_vencimiento,
+        )
+    )
+    db.flush()
+    # Con la anulada fuera del índice, una segunda deuda activa sí choca.
+    with pytest.raises(IntegrityError, match="uq_deuda_periodo"):
+        db.add(
+            Deuda(
+                gerente_id=gerente.id,
+                servicio_id=anulada.servicio_id,
+                periodo=anulada.periodo,
+                monto=None,
+                estado="esperando_recibo",
+                fecha_vencimiento=anulada.fecha_vencimiento,
+            )
+        )
+        db.flush()
+
+
 def test_la_solicitud_de_aprobacion_guarda_la_moneda(db: Session) -> None:
     gerente = crear_gerente(db)
     asistente = crear_asistente(db, gerente, "asistente1")
