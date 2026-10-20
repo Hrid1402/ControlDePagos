@@ -198,22 +198,34 @@ def restablecer_contrasena(
     token_hash = hashlib.sha256(token_crudo.encode()).hexdigest()
     ahora = datetime.now(UTC)
 
+    usuario_id = db.scalar(
+        select(TokenRestablecimiento.usuario_id).where(
+            TokenRestablecimiento.token_hash == token_hash
+        )
+    )
+    if usuario_id is None:
+        raise ErrorApi(400, "TOKEN_INVALIDO", "El token de restablecimiento es inválido o expiró.")
+
+    # Primero el usuario y después sus tokens, en el mismo orden que el cambio de contraseña:
+    # al guardar la nueva se invalidan los demás tokens pendientes del usuario, y bloquear antes
+    # el propio token provocaría un interbloqueo con otro restablecimiento simultáneo.
+    usuario = db.scalar(
+        select(Usuario)
+        .where(Usuario.id == usuario_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     registro = db.scalar(
         select(TokenRestablecimiento)
         .where(TokenRestablecimiento.token_hash == token_hash)
         .limit(1)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
 
     if registro is None or registro.usado_en is not None or registro.expira_en < ahora:
         raise ErrorApi(400, "TOKEN_INVALIDO", "El token de restablecimiento es inválido o expiró.")
 
-    usuario = db.scalar(
-        select(Usuario)
-        .where(Usuario.id == registro.usuario_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
     if usuario is None or usuario.eliminado_en is not None or usuario.estado != "activa":
         raise ErrorApi(400, "TOKEN_INVALIDO", "El token de restablecimiento es inválido o expiró.")
 
