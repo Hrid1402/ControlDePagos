@@ -14,13 +14,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
-from app.models import Categoria, Deuda, Empresa, Servicio, Usuario
+from app.models import Categoria, Deuda, Empresa, Recurrencia, Servicio, Usuario
 from app.schemas.servicios import FiltroEstado, ServicioEntrada
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
 from app.services.empresas import cumple_patron, empresa_del_catalogo
@@ -286,6 +286,58 @@ def editar_servicio(
             origen=origen,
         )
     return Edicion(FilaServicio(servicio, categoria, empresa), codigo_cambiado, pendientes)
+
+
+@dataclass(frozen=True)
+class Baja:
+    fila: FilaServicio
+    recurrencias_desactivadas: int
+    deudas_pendientes: int
+
+
+def dar_de_baja(db: Session, gerente: Usuario, servicio_id: uuid.UUID, origen: Origen) -> Baja:
+    """Detiene las deudas nuevas y conserva las pendientes (CA08): desactiva la recurrencia y
+    no toca deudas, órdenes ni pagos en curso. No hace commit."""
+    servicio = servicio_activo_propio(db, servicio_id, gerente.id, bloquear=True)
+    servicio.estado = "baja"
+    desactivadas = len(
+        db.execute(
+            update(Recurrencia)
+            .where(Recurrencia.servicio_id == servicio.id, Recurrencia.activa.is_(True))
+            .values(activa=False)
+            .returning(Recurrencia.id)
+        ).all()
+    )
+    db.flush()
+    db.refresh(servicio)
+    pendientes = contar_deudas_pendientes(db, servicio.id)
+    registrar_auditoria(
+        db,
+        gerente,
+        Accion.SERVICIO_DADO_DE_BAJA,
+        "servicio",
+        servicio.id,
+        {"recurrencias_desactivadas": desactivadas, "deudas_pendientes": pendientes},
+        origen=origen,
+    )
+    return Baja(fila_de(db, servicio), desactivadas, pendientes)
+
+
+def reactivar_servicio(
+    db: Session, gerente: Usuario, servicio_id: uuid.UUID, origen: Origen
+) -> FilaServicio:
+    """Vuelve a activar el servicio. Sus recurrencias siguen inactivas: se reactivan aparte para
+    no generar deudas de meses en que el servicio estuvo de baja. No hace commit."""
+    servicio = servicio_propio(db, servicio_id, gerente.id, bloquear=True)
+    if servicio.estado != "baja":
+        raise ErrorApi(409, "CONFLICTO", "El servicio ya está activo.")
+    servicio.estado = "activo"
+    db.flush()
+    db.refresh(servicio)
+    registrar_auditoria(
+        db, gerente, Accion.SERVICIO_REACTIVADO, "servicio", servicio.id, {}, origen=origen
+    )
+    return fila_de(db, servicio)
 
 
 @dataclass(frozen=True)

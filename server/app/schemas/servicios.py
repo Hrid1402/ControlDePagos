@@ -90,3 +90,10 @@ class AdvertenciasServicio(BaseModel):
 
 class ServicioEditadoSalida(ServicioSalida):
     advertencias: AdvertenciasServicio
+
+
+class ServicioBajaSalida(ServicioSalida):
+    """La baja conserva las deudas pendientes (CA08) y desactiva sus recurrencias."""
+
+    recurrencias_desactivadas: int
+    deudas_pendientes: int
