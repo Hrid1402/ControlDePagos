@@ -104,6 +104,16 @@ async function montar(
   await flushPromises()
   return { wrapper, router, control, sesion, http }
 }
+/** Abre el menú de la cuenta y elige una opción; el menú se monta fuera del componente. */
+async function elegirEnCuenta(wrapper: VueWrapper, opcion: string) {
+  await wrapper.get('button[aria-controls="menu-cuenta"]').trigger('click')
+  await flushPromises()
+  const item = [...document.querySelectorAll<HTMLElement>('#menu-cuenta [role="menuitem"]')].find(
+    (e) => e.textContent?.includes(opcion),
+  )!
+  item.querySelector<HTMLElement>('.p-menu-item-content')!.click()
+  await flushPromises()
+}
 describe('espacios y avisos de sesión', () => {
   it('ofrece reintentar tras un fallo de conexión y recupera la ruta autorizada', async () => {
     const { wrapper, router, http } = await montar(
@@ -131,9 +141,7 @@ describe('espacios y avisos de sesión', () => {
     const { wrapper, control, sesion, router } = await montar('gerente', true)
     await wrapper.get('input').setValue('Texto por guardar')
     expect(control.hayCambios()).toBe(true)
-    const cerrar = wrapper.findAll('button').find((b) => b.text().includes('Cerrar sesión'))!
-    await cerrar.trigger('click')
-    await flushPromises()
+    await elegirEnCuenta(wrapper, 'Cerrar sesión')
     let dialogo = document.querySelector('[role="alertdialog"]')!
     expect(dialogo.textContent).toContain('perderás lo que estás editando')
     ;[...dialogo.querySelectorAll('button')]
@@ -141,8 +149,7 @@ describe('espacios y avisos de sesión', () => {
       .click()
     await flushPromises()
     expect(wrapper.get('input').element.value).toBe('Texto por guardar')
-    await cerrar.trigger('click')
-    await flushPromises()
+    await elegirEnCuenta(wrapper, 'Cerrar sesión')
     dialogo = document.querySelector('[role="alertdialog"]')!
     ;[...dialogo.querySelectorAll('button')]
       .find((b) => b.textContent?.includes('Cerrar sin guardar'))!
@@ -151,26 +158,54 @@ describe('espacios y avisos de sesión', () => {
     expect(sesion.token).toBeNull()
   })
 
-  it.each(['gerente', 'asistente'] as const)(
-    'muestra identidad y salida para %s sin inventar contenido',
-    async (rol) => {
+  it.each([
+    ['gerente', ['Panel', 'Deudas', 'Calendario', 'Órdenes', 'Servicios', 'Asistentes'], 'deudas'],
+    ['asistente', ['Bandeja', 'Calendario', 'Ruta de pagos', 'Comprobantes'], 'calendario'],
+  ] as const)(
+    '%s: pestañas de su espacio, identidad visible y salida desde el menú de la cuenta',
+    async (rol, etiquetas, segunda) => {
       const { wrapper, router, sesion } = await montar(rol)
-      expect(wrapper.text()).toContain('Ana')
-      expect(wrapper.get('h1').text()).toContain('Tu espacio')
+      expect(wrapper.get('button[aria-controls="menu-cuenta"]').attributes('aria-label')).toContain(
+        'Ana',
+      )
       expect(wrapper.get('img').attributes('src')).toContain('wordmark-white.svg')
-      const menu = wrapper.get('button[aria-controls="navegacion"]')
-      expect(menu.attributes('aria-expanded')).toBe('false')
-      await menu.trigger('click')
-      expect(menu.attributes('aria-expanded')).toBe('true')
-      await wrapper.get('#navegacion a').trigger('click')
-      expect(menu.attributes('aria-expanded')).toBe('false')
-      const cerrar = wrapper.findAll('button').find((b) => b.text().includes('Cerrar sesión'))!
-      await cerrar.trigger('click')
+      const pestanas = wrapper.findAll('nav[aria-label="Secciones"] a').map((a) => a.text())
+      expect(pestanas).toEqual(expect.arrayContaining([...etiquetas]))
+      // La sección sin pantalla todavía lo dice; no muestra datos de ejemplo.
+      expect(wrapper.get('main h1').text()).toBe(etiquetas[0])
+      expect(wrapper.text()).toContain('Esta sección se habilitará')
+      expect(wrapper.get('nav[aria-label="Secciones"] a.activa').text()).toBe(etiquetas[0])
+
+      await wrapper.findAll('nav[aria-label="Secciones"] a')[1]!.trigger('click')
       await flushPromises()
+      expect(router.currentRoute.value.name).toBe(`${rol}-${segunda}`)
+
+      await elegirEnCuenta(wrapper, 'Mi cuenta')
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe(`${rol}-cuenta`))
+
+      await elegirEnCuenta(wrapper, 'Cerrar sesión')
       expect(sesion.token).toBeNull()
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('login'))
     },
   )
+  it('el gerente encuentra las secciones secundarias en Más y las ve como pestaña al abrirlas', async () => {
+    const { wrapper, router } = await montar('gerente')
+    await wrapper.get('button[aria-controls="secciones-mas"]').trigger('click')
+    await flushPromises()
+    const opciones = [...document.querySelectorAll('#secciones-mas [role="menuitem"]')].map((e) =>
+      e.textContent?.trim(),
+    )
+    expect(opciones).toEqual(['Categorías', 'Límites', 'Historial'])
+    document
+      .querySelector<HTMLElement>(
+        '#secciones-mas [role="menuitem"]:last-child .p-menu-item-content',
+      )!
+      .click()
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('gerente-historial')
+    expect(wrapper.get('nav[aria-label="Secciones"] li.actual a').text()).toBe('Historial')
+    expect(wrapper.get('button[aria-controls="secciones-mas"]').classes()).toContain('activa')
+  })
   it('mantiene el formulario montado al continuar y permite el cierre forzoso sin confirmación bloqueante', async () => {
     const { wrapper, control, sesion, router } = await montar('gerente', true)
     await wrapper.get('input').setValue('Dato sin guardar')
