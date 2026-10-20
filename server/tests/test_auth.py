@@ -319,6 +319,26 @@ def test_la_cuenta_inactiva_con_contrasena_incorrecta_responde_generico(
 
 
 @pytest.mark.parametrize("contrasena", [CONTRASENA, "incorrecta"])
+def test_la_cuenta_inactiva_y_bloqueada_responde_423_sin_revelar_que_esta_inactiva(
+    cliente: TestClient, db: Session, equipos: DosGerentes, contrasena: str
+) -> None:
+    # El bloqueo se revisa antes que la contraseña y el estado: mientras dure, nadie averigua
+    # si la cuenta está inactiva ni si la contraseña era correcta.
+    asistente = equipos.uno.asistente
+    asistente.estado = "inactiva"
+    asistente.intentos_fallidos = 5
+    asistente.bloqueado_hasta = datetime.now(UTC) + timedelta(minutes=10)
+    db.flush()
+    r = ingresar(cliente, asistente.username, contrasena)
+    assert r.status_code == 423
+    assert r.json() == bloqueada("10 minutos")
+    db.refresh(asistente)
+    assert asistente.intentos_fallidos == 5
+    [evento] = eventos_de(db, asistente)
+    assert evento.detalle["motivo"] == "cuenta_bloqueada"
+
+
+@pytest.mark.parametrize("contrasena", [CONTRASENA, "incorrecta"])
 def test_la_cuenta_eliminada_responde_generico_sin_contar_intento(
     cliente: TestClient, db: Session, equipos: DosGerentes, contrasena: str
 ) -> None:
