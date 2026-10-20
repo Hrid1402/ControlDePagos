@@ -98,6 +98,15 @@ class InicioPago:
     repetido: bool = False
 
 
+def saldo_confirmado(db: Session, deuda: Deuda) -> Decimal:
+    """Saldo de una deuda que por su estado ya tiene monto. Sin monto solo pueden estar
+    esperando_recibo y anulada, que nunca llegan aquí; si llegara otra, es un dato corrupto y
+    se detiene en lugar de tratarla como saldo cero."""
+    saldo = saldo_de(db, deuda)
+    assert saldo is not None, f"La deuda {deuda.id} en estado {deuda.estado} no tiene monto"
+    return saldo
+
+
 def sin_permiso() -> ErrorApi:
     return ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
 
@@ -262,7 +271,9 @@ def iniciar_pago(
     if deuda.estado == "en_proceso":
         if deuda.pago_iniciado_por != usuario.id:
             raise ErrorApi(409, "PAGO_EN_CURSO", "Otra persona ya está pagando esta deuda.")
-        return InicioPago(ResultadoInicio.INICIADO, deuda, saldo_de(db, deuda), repetido=True)
+        return InicioPago(
+            ResultadoInicio.INICIADO, deuda, saldo_confirmado(db, deuda), repetido=True
+        )
     if deuda.estado == "esperando_aprobacion":
         solicitud = solicitud_pendiente(db, deuda.id)
         if solicitud is None or solicitud.asistente_id != usuario.id:
@@ -274,7 +285,7 @@ def iniciar_pago(
         return InicioPago(
             ResultadoInicio.REQUIERE_APROBACION,
             deuda,
-            saldo_de(db, deuda),
+            saldo_confirmado(db, deuda),
             solicitud,
             repetido=True,
         )
@@ -282,7 +293,7 @@ def iniciar_pago(
         mensaje = MENSAJES_ESTADO.get(deuda.estado, "El estado de la deuda no permite pagarla.")
         raise ErrorApi(409, "ESTADO_NO_PERMITIDO", mensaje)
 
-    saldo = saldo_de(db, deuda)
+    saldo = saldo_confirmado(db, deuda)
     if saldo <= 0:
         raise ErrorApi(409, "SIN_SALDO", "La deuda no tiene saldo pendiente.")
 
@@ -387,7 +398,8 @@ def acciones_de_pago(db: Session, deuda: Deuda, usuario: Usuario) -> AccionesPag
         and not deuda.pago_realizado
         and not tiene_comprobante_activo(db, deuda.id)
     )
+    saldo = saldo_de(db, deuda)
     return AccionesPago(
-        iniciar=deuda.estado in ESTADOS_INICIABLES and saldo_de(db, deuda) > 0,
+        iniciar=deuda.estado in ESTADOS_INICIABLES and saldo is not None and saldo > 0,
         cancelar_inicio=puede_cancelar,
     )

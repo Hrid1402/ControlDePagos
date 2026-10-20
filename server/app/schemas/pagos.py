@@ -22,7 +22,8 @@ class CancelarInicioEntrada(BaseModel):
 
 
 class DeudaPagoSalida(BaseModel):
-    """Estado de pago de la deuda. saldo es calculado: monto menos abonos validados."""
+    """Estado de pago de la deuda. saldo es calculado: monto menos abonos validados,
+    o null si la deuda aún no tiene monto (esperando recibo)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,7 +31,7 @@ class DeudaPagoSalida(BaseModel):
     estado: str
     monto: Decimal | None
     moneda: str
-    saldo: Decimal
+    saldo: Decimal | None
     pago_iniciado_en: datetime | None
     pago_iniciado_por: uuid.UUID | None
 
