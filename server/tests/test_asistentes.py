@@ -371,6 +371,10 @@ def test_concurrencia_creacion_asistentes() -> None:
                 {"gid": gerente_id},
             )
             db_cleanup.execute(
+                text("DELETE FROM activacion_cuenta WHERE realizada_por = :gid"),
+                {"gid": gerente_id},
+            )
+            db_cleanup.execute(
                 text("DELETE FROM auditoria WHERE gerente_id = :gid"),
                 {"gid": gerente_id},
             )

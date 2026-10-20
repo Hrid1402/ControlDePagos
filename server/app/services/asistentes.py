@@ -133,31 +133,8 @@ def crear_asistente(
     else:
         contrasena_plana = generar_contrasena_segura(12)
 
-    # Regla: Una activa por gerente (TASK-14)
-    if datos.activar_ahora:
-        asistente_activa = db.scalar(
-            select(Usuario).where(
-                Usuario.gerente_id == gerente.id,
-                Usuario.rol == "asistente",
-                Usuario.estado == "activa",
-                Usuario.eliminado_en.is_(None),
-            )
-        )
-        if asistente_activa is not None:
-            asistente_activa.estado = "inactiva"
-            registrar_auditoria(
-                db,
-                gerente,
-                Accion.CUENTA_DESACTIVADA,
-                "usuario",
-                asistente_activa.id,
-                {"motivo": "reemplazada_por_nueva_asistente"},
-                origen=origen,
-            )
-        nuevo_estado = "activa"
-    else:
-        nuevo_estado = "inactiva"
-
+    # La cuenta nace inactiva; activar ahora es la misma activación de TASK-14, que reemplaza a
+    # la actual cerrando su sesión y traspasando sus órdenes sin atender.
     asistente = Usuario(
         gerente_id=gerente.id,
         rol="asistente",
@@ -165,7 +142,7 @@ def crear_asistente(
         password_hash=hashear_contrasena(contrasena_plana),
         nombres=datos.nombres.strip(),
         apellidos=datos.apellidos.strip(),
-        estado=nuevo_estado,
+        estado="inactiva",
         contrasena_inicial=True,
     )
     db.add(asistente)
@@ -176,7 +153,7 @@ def crear_asistente(
         "username": asistente.username,
         "nombres": asistente.nombres,
         "apellidos": asistente.apellidos,
-        "estado": nuevo_estado,
+        "estado": "activa" if datos.activar_ahora else "inactiva",
     }
     registrar_auditoria(
         db,
@@ -188,16 +165,8 @@ def crear_asistente(
         origen=origen,
     )
 
-    if nuevo_estado == "activa":
-        registrar_auditoria(
-            db,
-            gerente,
-            Accion.CUENTA_ACTIVADA,
-            "usuario",
-            asistente.id,
-            {"motivo": "activada_al_crear"},
-            origen=origen,
-        )
+    if datos.activar_ahora:
+        activar_cuenta(db, gerente, asistente, bloquear_activa(db, gerente), origen)
 
     db.commit()
     db.refresh(asistente)
@@ -365,6 +334,16 @@ def activar_asistente(
     if asistente.estado == "activa":
         return Activacion(activada=asistente, repetido=True)
 
+    activacion = activar_cuenta(db, gerente, asistente, anterior, origen)
+    db.commit()
+    return activacion
+
+
+def activar_cuenta(
+    db: Session, gerente: Usuario, asistente: Usuario, anterior: Usuario | None, origen: Origen
+) -> Activacion:
+    """Activa una cuenta inactiva sin confirmar: desactiva la anterior, ya bloqueada, y le
+    traspasa sus órdenes sin atender. Quien llama bloqueó al gerente y hace el commit."""
     pendientes: list[OrdenPago] = []
     if anterior is not None:
         pendientes = ordenes_sin_atender(db, anterior)
@@ -397,7 +376,6 @@ def activar_asistente(
         )
         publicar_evento_orden(db, orden, TipoEvento.ORDEN_NUEVA)
 
-    db.commit()
     return Activacion(activada=asistente, desactivada=anterior, ordenes_traspasadas=pendientes)
 
 
