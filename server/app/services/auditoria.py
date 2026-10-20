@@ -35,6 +35,9 @@ class Accion(StrEnum):
     DEUDA_MONTO_CAMBIADO = "deuda_monto_cambiado"
     DEUDA_ESTADO_CAMBIADO = "deuda_estado_cambiado"
     CONTRASENA_RESTABLECIDA = "contrasena_restablecida"
+    PAGO_INICIADO = "pago_iniciado"
+    PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
+    APROBACION_SOLICITADA = "aprobacion_solicitada"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.

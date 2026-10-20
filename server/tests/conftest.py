@@ -1,7 +1,10 @@
+import hashlib
 import os
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -18,7 +21,14 @@ os.environ.setdefault("JWT_SECRET", "clave-de-pruebas-clave-de-pruebas")
 
 from app.core import eventos  # noqa: E402
 from app.core.eventos import Evento  # noqa: E402
-from app.models import Usuario  # noqa: E402
+from app.models import (  # noqa: E402
+    Categoria,
+    Comprobante,
+    ComprobanteDeuda,
+    Deuda,
+    Servicio,
+    Usuario,
+)
 
 
 @dataclass
@@ -82,3 +92,73 @@ def publicados(monkeypatch: pytest.MonkeyPatch) -> list[tuple[uuid.UUID, Evento]
 
     monkeypatch.setattr(eventos, "publicar", capturar)
     return salida
+
+
+def nueva_deuda(
+    db: Session,
+    gerente: Usuario,
+    monto: str = "100.00",
+    moneda: str = "PEN",
+    estado: str = "pendiente",
+    fecha_vencimiento: date = date(2026, 10, 25),
+) -> Deuda:
+    """Deuda con su propio servicio y categoría, para no chocar con las unicidades por gerente."""
+    marca = uuid.uuid4().hex
+    categoria = Categoria(gerente_id=gerente.id, nombre=f"Cat {marca}", tipo="servicio_variable")
+    db.add(categoria)
+    db.flush()
+    servicio = Servicio(
+        gerente_id=gerente.id,
+        categoria_id=categoria.id,
+        empresa_nombre="Hidrandina",
+        codigo_suministro=marca,
+    )
+    db.add(servicio)
+    db.flush()
+    deuda = Deuda(
+        gerente_id=gerente.id,
+        servicio_id=servicio.id,
+        periodo=fecha_vencimiento.replace(day=1),
+        monto=Decimal(monto),
+        moneda=moneda,
+        estado=estado,
+        fecha_vencimiento=fecha_vencimiento,
+    )
+    db.add(deuda)
+    db.flush()
+    return deuda
+
+
+def nuevo_comprobante(
+    db: Session,
+    deuda: Deuda,
+    subido_por: Usuario,
+    monto_aplicado: str,
+    estado: str = "validado",
+    creado_en: datetime | None = None,
+) -> Comprobante:
+    """Comprobante con su abono a la deuda (comprobante_deuda)."""
+    comprobante = Comprobante(
+        gerente_id=deuda.gerente_id,
+        archivo_url=f"comprobantes/{uuid.uuid4()}.jpg",
+        archivo_tipo="jpg",
+        archivo_bytes=1000,
+        hash_sha256=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+        monto=Decimal(monto_aplicado),
+        moneda=deuda.moneda,
+        estado=estado,
+        subido_por=subido_por.id,
+    )
+    if creado_en is not None:
+        comprobante.creado_en = creado_en
+    db.add(comprobante)
+    db.flush()
+    db.add(
+        ComprobanteDeuda(
+            comprobante_id=comprobante.id,
+            deuda_id=deuda.id,
+            monto_aplicado=Decimal(monto_aplicado),
+        )
+    )
+    db.flush()
+    return comprobante

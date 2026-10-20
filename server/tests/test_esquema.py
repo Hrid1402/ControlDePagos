@@ -8,7 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Categoria, Deuda, Servicio, Usuario
+from app.models import Categoria, Deuda, Servicio, SolicitudAprobacion, Usuario
+from tests.conftest import nueva_deuda
 
 
 def crear_gerente(db: Session) -> Usuario:
@@ -107,6 +108,20 @@ def test_la_deuda_rechaza_monto_cero(db: Session) -> None:
                 fecha_vencimiento=date(2026, 10, 20),
             )
         )
+        db.flush()
+
+
+def test_la_solicitud_de_aprobacion_guarda_la_moneda(db: Session) -> None:
+    gerente = crear_gerente(db)
+    asistente = crear_asistente(db, gerente, "asistente1")
+    deuda = nueva_deuda(db, gerente, moneda="USD")
+    solicitud = SolicitudAprobacion(deuda_id=deuda.id, asistente_id=asistente.id, monto=Decimal(5))
+    db.add(solicitud)
+    db.flush()
+    db.refresh(solicitud)
+    assert solicitud.moneda == "PEN"
+    with pytest.raises(IntegrityError, match="ck_solicitud_aprobacion_moneda"):
+        solicitud.moneda = "EUR"
         db.flush()
 
 

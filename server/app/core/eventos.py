@@ -16,13 +16,13 @@ from datetime import datetime
 from enum import StrEnum
 from functools import cache
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import redis
 from sqlalchemy import event
 from sqlalchemy.orm import Session, SessionTransaction
 
 from app.core.config import settings
+from app.core.tiempo import ahora_lima
 
 logger = logging.getLogger("app.tiempo_real")
 
@@ -42,10 +42,7 @@ class TipoEvento(StrEnum):
     NOTIFICACION = "notificacion"
     SESION_CERRADA = "sesion_cerrada"
     RESINCRONIZAR = "resincronizar"
-
-
-def ahora_lima() -> datetime:
-    return datetime.now(ZoneInfo(settings.timezone))
+    PAGO_CANCELADO = "pago_cancelado"
 
 
 @dataclass(frozen=True)
