@@ -192,6 +192,37 @@ def crear_asistente(
     return asistente, contrasena_plana
 
 
+# --- Consulta (TASK-11) ---
+
+
+def consulta_lista(gerente: Usuario) -> Select[Usuario]:
+    """Cuentas del gerente sin las eliminadas: la activa primero (CA02) y luego de la más reciente
+    a la más antigua. paginar agrega el id como desempate estable."""
+    return consulta_asistentes(gerente).order_by(
+        (Usuario.estado == "activa").desc(), Usuario.creado_en.desc()
+    )
+
+
+@dataclass(frozen=True)
+class DetalleAsistente:
+    asistente: Usuario
+    historial: list[tuple[ActivacionCuenta, Usuario]]
+
+
+def detalle_asistente(db: Session, gerente: Usuario, asistente_id: uuid.UUID) -> DetalleAsistente:
+    """Cuenta del gerente con su historial de activaciones (CA17); ajena o eliminada, 404."""
+    asistente = db.scalar(consulta_asistentes(gerente).where(Usuario.id == asistente_id))
+    if asistente is None:
+        raise ErrorApi(404, "NO_ENCONTRADO", "No se encontró el recurso solicitado.")
+    filas = db.execute(
+        select(ActivacionCuenta, Usuario)
+        .join(Usuario, Usuario.id == ActivacionCuenta.realizada_por)
+        .where(ActivacionCuenta.cuenta_id == asistente.id)
+        .order_by(ActivacionCuenta.creado_en.desc(), ActivacionCuenta.id.desc())
+    )
+    return DetalleAsistente(asistente, [(evento, autor) for evento, autor in filas.tuples()])
+
+
 # --- Ciclo de la cuenta (TASK-14) ---
 
 AVISO_SIN_ASISTENTE = "No queda ninguna asistente activa: tú harás los pagos."

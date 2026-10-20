@@ -1,3 +1,4 @@
+import type { Component } from 'vue'
 import type { Rol } from '@/types/api'
 
 /** Una sección del espacio de un rol. La clave vacía es la sección de inicio del rol. */
@@ -7,6 +8,8 @@ export interface Seccion {
   descripcion: string
   /** Va en las pestañas de la hoja; las demás, en «Más» (en celular se muestran todas). */
   principal: boolean
+  /** Pantalla de la sección; sin ella, la ruta muestra que la sección está pendiente. */
+  pagina?: () => Promise<Component>
 }
 
 // Fuente única de las rutas y de las pestañas: una sección nueva se agrega aquí y obtiene su ruta
@@ -48,6 +51,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Asistentes',
       descripcion: 'La cuenta de tu asistente: crearla, activarla o restablecer su acceso.',
       principal: true,
+      pagina: () => import('@/pages/AsistentesPage.vue'),
     },
     {
       clave: 'categorias',

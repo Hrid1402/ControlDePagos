@@ -1,7 +1,8 @@
-"""Endpoints para la gestión y creación de asistentes por parte del gerente (TASK-13 y TASK-14).
+"""Endpoints para la gestión y creación de asistentes por parte del gerente (TASK-11 a TASK-14).
 
 CA04: Solo nombres y apellidos son requeridos al crear la asistente.
 CA08: Las credenciales se muestran una sola vez al crearse la cuenta.
+CA01, CA02 y CA17: lista y detalle con historial de activaciones.
 CA10 a CA16: activar, desactivar, eliminar y restablecer la contraseña de una cuenta.
 """
 
@@ -11,26 +12,46 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 
 from app.core.dependencias import OrigenSolicitud, SesionDb, SoloGerente
+from app.core.paginacion import Pagina, ParametrosPagina, paginar
 from app.schemas.asistentes import (
     ActivacionSalida,
     AsistenteCreadaSalida,
+    AsistenteDetalleSalida,
+    AsistenteListaSalida,
     AsistenteResumen,
     ContrasenaRestablecidaSalida,
     CrearAsistenteEntrada,
     DesactivacionSalida,
     DisponibilidadUsernameSalida,
+    EventoActivacion,
 )
 from app.services.asistentes import (
     AVISO_SIN_ASISTENTE,
     activar_asistente,
+    consulta_lista,
     crear_asistente,
     desactivar_asistente,
+    detalle_asistente,
     eliminar_asistente,
     restablecer_contrasena_asistente,
     verificar_disponibilidad_username,
 )
+from app.services.auditoria import nombre_de
 
 router = APIRouter(prefix="/asistentes", tags=["asistentes"])
+
+
+@router.get("", response_model=Pagina[AsistenteListaSalida])
+def listar(
+    gerente: SoloGerente, db: SesionDb, pagina: ParametrosPagina
+) -> Pagina[AsistenteListaSalida]:
+    """Cuentas del gerente, la activa primero (CA01 y CA02)."""
+    resultado = paginar(db, consulta_lista(gerente), pagina)
+    return Pagina(
+        items=[AsistenteListaSalida.model_validate(cuenta) for cuenta in resultado.items],
+        total=resultado.total,
+        page=resultado.page,
+    )
 
 
 @router.get("/disponibilidad", response_model=DisponibilidadUsernameSalida)
@@ -131,4 +152,21 @@ def restablecer_contrasena(
         username=asistente.username,
         contrasena=contrasena_plana,
         contrasena_inicial=asistente.contrasena_inicial,
+    )
+
+
+@router.get("/{asistente_id}", response_model=AsistenteDetalleSalida)
+def detalle(asistente_id: uuid.UUID, gerente: SoloGerente, db: SesionDb) -> AsistenteDetalleSalida:
+    """Datos, estado, fechas e historial de activaciones de una cuenta (CA17)."""
+    resultado = detalle_asistente(db, gerente, asistente_id)
+    return AsistenteDetalleSalida.model_validate(
+        {
+            **AsistenteListaSalida.model_validate(resultado.asistente).model_dump(),
+            "historial": [
+                EventoActivacion(
+                    accion=evento.accion, realizada_por=nombre_de(autor), creado_en=evento.creado_en
+                )
+                for evento, autor in resultado.historial
+            ],
+        }
     )

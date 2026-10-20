@@ -73,7 +73,8 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/ordenes/{orden_id}/rechazar"): (
         "asistente ajena: test_api_ordenes::test_dos_gerentes_no_ven_ni_responden_ordenes_ajenas"
     ),
-    # Gestión de asistentes (TASK-14): las tres celdas están en MATRIZ.
+    # Gestión de asistentes (TASK-11 y TASK-14): las celdas están en MATRIZ.
+    ("GET", "/api/v1/asistentes/{asistente_id}"): "MATRIZ",
     ("POST", "/api/v1/asistentes/{asistente_id}/activar"): "MATRIZ",
     ("POST", "/api/v1/asistentes/{asistente_id}/desactivar"): "MATRIZ",
     ("POST", "/api/v1/asistentes/{asistente_id}/restablecer-contrasena"): "MATRIZ",
@@ -157,6 +158,7 @@ ORDENES = ("vista", "aceptar", "rechazar")
 # Solo el gerente gestiona sus asistentes: el de otro equipo no las encuentra y cualquier
 # asistente, de su equipo o de otro, recibe 403 antes de que se busque la cuenta.
 GESTION_ASISTENTES = (
+    ("GET", "/api/v1/asistentes/{asistente_id}", asistente_activa),
     ("POST", "/api/v1/asistentes/{asistente_id}/activar", asistente_inactiva),
     ("POST", "/api/v1/asistentes/{asistente_id}/desactivar", asistente_activa),
     ("POST", "/api/v1/asistentes/{asistente_id}/restablecer-contrasena", asistente_activa),
