@@ -38,6 +38,8 @@ class Accion(StrEnum):
     PAGO_INICIADO = "pago_iniciado"
     PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
     APROBACION_SOLICITADA = "aprobacion_solicitada"
+    DEUDA_FIJADA = "deuda_fijada"
+    DEUDA_POSPUESTA = "deuda_pospuesta"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.
