@@ -1,0 +1,15 @@
+# Contexto de la imagen del client (docker build -f client/Dockerfile .): solo lo que necesita
+# pnpm para instalar y compilar. El server tiene su propio contexto y su .dockerignore.
+.git
+.github
+.husky
+.vscode
+docker
+server
+node_modules
+**/node_modules
+client/dist
+client/coverage
+**/.env
+**/.env.*
+**/.DS_Store
