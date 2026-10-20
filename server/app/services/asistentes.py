@@ -214,8 +214,13 @@ class Desactivacion:
 
 
 def bloquear_gerente(db: Session, gerente: Usuario) -> None:
-    """Serializa las operaciones del gerente sobre sus asistentes hasta el commit."""
-    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update())
+    """Serializa las operaciones del gerente sobre sus asistentes hasta el commit.
+
+    FOR NO KEY UPDATE y no FOR UPDATE: otra transacción que inserta una fila con llave foránea al
+    gerente, como la auditoría del restablecimiento por enlace, toma FOR KEY SHARE sobre esta fila.
+    Con FOR UPDATE esperaría al gerente mientras el gerente espera a la asistente que ella tiene
+    bloqueada, y PostgreSQL cortaría una de las dos por interbloqueo."""
+    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update(key_share=True))
 
 
 def consulta_asistentes(gerente: Usuario) -> Select[Usuario]:
@@ -228,11 +233,13 @@ def consulta_asistentes(gerente: Usuario) -> Select[Usuario]:
 
 
 def bloquear_asistente_propia(db: Session, gerente: Usuario, asistente_id: uuid.UUID) -> Usuario:
-    """Asistente del gerente bloqueada y releída; si no existe, es ajena o fue eliminada, 404."""
+    """Asistente del gerente bloqueada y releída; si no existe, es ajena o fue eliminada, 404.
+    Sin bloquear las llaves foráneas, como bloquear_gerente; sigue esperando al FOR SHARE con que
+    app/services/ordenes.py relee a la asistente mientras ella responde una orden."""
     asistente = db.scalar(
         consulta_asistentes(gerente)
         .where(Usuario.id == asistente_id)
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
     if asistente is None:
@@ -244,7 +251,7 @@ def bloquear_activa(db: Session, gerente: Usuario) -> Usuario | None:
     return db.scalar(
         consulta_asistentes(gerente)
         .where(Usuario.estado == "activa")
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
 
