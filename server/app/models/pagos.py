@@ -84,6 +84,7 @@ class SolicitudAprobacion(ConId, ConActualizado, Base):
     deuda_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deuda.id"), index=True)
     asistente_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usuario.id"), index=True)
     monto: Mapped[Decimal]
+    moneda: Mapped[str] = mapped_column(server_default=text("'PEN'"))
     estado: Mapped[str] = mapped_column(server_default=text("'pendiente'"))
     motivo: Mapped[str | None]
     recordatorios_enviados: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
