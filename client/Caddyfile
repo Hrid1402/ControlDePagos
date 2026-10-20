@@ -1,0 +1,40 @@
+# Sirve la SPA y reenvía /api al server, todo en el mismo dominio: sin CORS ni URLs absolutas.
+# Variables: PORT (la asigna Railway) y API_UPSTREAM (host:puerto privado del server).
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# API REST y WebSocket /api/v1/ws. La IP del cliente la fija el borde de Railway en
+	# X-Real-IP; se reemplaza X-Forwarded-For para que no llegue una IP enviada por el navegador.
+	# El esquema también viene del borde: Caddy recibe HTTP aunque el usuario entre por HTTPS.
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM} {
+			header_up X-Forwarded-For {header.X-Real-IP}
+			header_up X-Forwarded-Proto {header.X-Forwarded-Proto}
+		}
+	}
+
+	# Todo lo demás es la SPA: los archivos de dist o, si no existen, index.html. Por eso /docs y
+	# /openapi.json del server no se alcanzan desde fuera.
+	handle {
+		root * /srv
+		@recursos path /assets/*
+		@paginas not path /assets/*
+		header @recursos Cache-Control "public, max-age=31536000, immutable"
+		header @paginas Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

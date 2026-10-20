@@ -25,6 +25,7 @@ jobs:
       server: ${{ steps.filtro.outputs.server }}
       lockfiles: ${{ steps.dependencias.outputs.cambiaron }}
       github: ${{ steps.filtro.outputs.github }}
+      imagenes: ${{ steps.filtro.outputs.imagenes }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -46,6 +47,13 @@ jobs:
               - 'server/pyproject.toml'
             github:
               - '.github/**'
+            imagenes:
+              - 'server/**'
+              - 'client/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.dockerignore'
       - name: Comprobar cambios reales de dependencias
         id: dependencias
         if: steps.filtro.outputs.lockfiles == 'true'
@@ -401,9 +409,45 @@ jobs:
       - name: Vulnerabilidades
         run: uv run pip-audit
 
+  imagenes:
+    name: Imágenes de despliegue
+    needs: cambios
+    if: needs.cambios.outputs.imagenes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      # Las capas se guardan en la caché de Actions: sin cambios en los lockfiles, solo se
+      # reconstruye el código.
+      - name: Server
+        uses: docker/build-push-action@v7
+        with:
+          context: server
+          tags: control-pagos-server:pr
+          load: true
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,scope=server,mode=max
+      - name: Client
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: client/Dockerfile
+          tags: control-pagos-client:pr
+          load: true
+          cache-from: type=gha,scope=client
+          cache-to: type=gha,scope=client,mode=max
+      - name: Imagen del server sin .env ni pruebas
+        run: |
+          contenido=$(docker run --rm control-pagos-server:pr ls -A /app)
+          echo "$contenido"
+          if echo "$contenido" | grep -qE '^(\.env|tests)$'; then echo "La imagen incluye .env o tests."; exit 1; fi
+      - name: Caddyfile válido
+        run: docker run --rm -e API_UPSTREAM=server:8000 control-pagos-client:pr caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
   reporte:
     name: Reporte
-    needs: [cambios, estructura, commits, seguridad, codeql, dependencias, workflows, client, server]
+    needs: [cambios, estructura, commits, seguridad, codeql, dependencias, workflows, client, server, imagenes]
     if: always()
     runs-on: ubuntu-latest
     outputs:
@@ -421,6 +465,7 @@ jobs:
           R_WORKFLOWS: ${{ needs.workflows.result }}
           R_CLIENT: ${{ needs.client.result }}
           R_SERVER: ${{ needs.server.result }}
+          R_IMAGENES: ${{ needs.imagenes.result }}
           C_CLIENT: ${{ needs.cambios.outputs.client }}
           C_SERVER: ${{ needs.cambios.outputs.server }}
         with:
@@ -437,6 +482,7 @@ jobs:
               'Validación de workflows': process.env.R_WORKFLOWS,
               'Client': process.env.R_CLIENT,
               'Server': process.env.R_SERVER,
+              'Imágenes de despliegue': process.env.R_IMAGENES,
             };
             const texto = r => ({ success: 'Aprobado', skipped: 'Sin cambios', failure: 'Rechazado', cancelled: 'Cancelado' }[r] || r);
             const aprobada = !Object.values(resultados).some(r => r === 'failure' || r === 'cancelled');
