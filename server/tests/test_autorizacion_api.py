@@ -29,6 +29,8 @@ from app.models import Auditoria, Deuda, OrdenPago, Servicio, Usuario
 from app.services.pagos import iniciar_pago
 from tests.conftest import DosGerentes, nueva_categoria, nueva_deuda, nueva_orden
 
+Recurso = Servicio | Deuda | OrdenPago | Usuario
+
 NO_ENCONTRADO = (404, "NO_ENCONTRADO")
 SIN_PERMISO = (403, "SIN_PERMISO")
 
@@ -71,6 +73,11 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/ordenes/{orden_id}/rechazar"): (
         "asistente ajena: test_api_ordenes::test_dos_gerentes_no_ven_ni_responden_ordenes_ajenas"
     ),
+    # Gestión de asistentes (TASK-14): las tres celdas están en MATRIZ.
+    ("POST", "/api/v1/asistentes/{asistente_id}/activar"): "MATRIZ",
+    ("POST", "/api/v1/asistentes/{asistente_id}/desactivar"): "MATRIZ",
+    ("POST", "/api/v1/asistentes/{asistente_id}/restablecer-contrasena"): "MATRIZ",
+    ("DELETE", "/api/v1/asistentes/{asistente_id}"): "MATRIZ",
 }
 
 
@@ -82,15 +89,18 @@ class Recursos:
     deuda: Deuda
     en_proceso: Deuda
     orden: OrdenPago
+    asistente: Usuario
+    # Activarla o eliminarla le funcionaría a su gerente: el rechazo solo viene de quién llama.
+    inactiva: Usuario
 
 
 @dataclass(frozen=True)
 class Caso:
     metodo: str
     ruta: str
-    actor: str  # "gerente_ajeno", "asistente_ajena" o "gerente_propio"
+    actor: str  # "gerente_ajeno", "asistente_ajena", "gerente_propio" o "asistente_propia"
     esperado: tuple[int, str]
-    recurso: Callable[[Recursos], Servicio | Deuda | OrdenPago]
+    recurso: Callable[[Recursos], Recurso]
     # Un cuerpo válido para quien llama: así el rechazo solo puede venir de la autorización.
     cuerpo: Callable[[Session, DosGerentes], dict[str, Any] | None] = lambda db, equipos: None
 
@@ -135,7 +145,23 @@ def orden(r: Recursos) -> OrdenPago:
     return r.orden
 
 
+def asistente_activa(r: Recursos) -> Usuario:
+    return r.asistente
+
+
+def asistente_inactiva(r: Recursos) -> Usuario:
+    return r.inactiva
+
+
 ORDENES = ("vista", "aceptar", "rechazar")
+# Solo el gerente gestiona sus asistentes: el de otro equipo no las encuentra y cualquier
+# asistente, de su equipo o de otro, recibe 403 antes de que se busque la cuenta.
+GESTION_ASISTENTES = (
+    ("POST", "/api/v1/asistentes/{asistente_id}/activar", asistente_inactiva),
+    ("POST", "/api/v1/asistentes/{asistente_id}/desactivar", asistente_activa),
+    ("POST", "/api/v1/asistentes/{asistente_id}/restablecer-contrasena", asistente_activa),
+    ("DELETE", "/api/v1/asistentes/{asistente_id}", asistente_inactiva),
+)
 
 MATRIZ = [
     Caso("GET", "/api/v1/servicios/{servicio_id}", "gerente_ajeno", NO_ENCONTRADO, servicio),
@@ -178,6 +204,15 @@ MATRIZ = [
         for accion in ORDENES
         for actor in ("gerente_propio", "gerente_ajeno")
     ),
+    *(
+        Caso(metodo, ruta, actor, esperado, objetivo)
+        for metodo, ruta, objetivo in GESTION_ASISTENTES
+        for actor, esperado in (
+            ("gerente_ajeno", NO_ENCONTRADO),
+            ("asistente_ajena", SIN_PERMISO),
+            ("asistente_propia", SIN_PERMISO),
+        )
+    ),
 ]
 
 
@@ -195,12 +230,22 @@ def recursos(db: Session, dos_gerentes: DosGerentes) -> Recursos:
     pendiente = nueva_deuda(db, uno.gerente)
     iniciada = nueva_deuda(db, uno.gerente)
     iniciar_pago(db, uno.asistente, iniciada.id, origen=Origen(dispositivo=None, ip=None))
+    inactiva = Usuario(
+        rol="asistente",
+        gerente_id=uno.gerente.id,
+        username=f"inactiva_{uuid.uuid4().hex[:8]}",
+        password_hash="x",
+        estado="inactiva",
+    )
+    db.add(inactiva)
     db.flush()
     return Recursos(
         servicio=db.get_one(Servicio, pendiente.servicio_id),
         deuda=pendiente,
         en_proceso=iniciada,
         orden=nueva_orden(db, nueva_deuda(db, uno.gerente), asistente=uno.asistente),
+        asistente=uno.asistente,
+        inactiva=inactiva,
     )
 
 
@@ -209,10 +254,11 @@ def actor(equipos: DosGerentes, nombre: str) -> Usuario:
         "gerente_ajeno": equipos.dos.gerente,
         "asistente_ajena": equipos.dos.asistente,
         "gerente_propio": equipos.uno.gerente,
+        "asistente_propia": equipos.uno.asistente,
     }[nombre]
 
 
-def columnas(objeto: Servicio | Deuda | OrdenPago) -> dict[str, Any]:
+def columnas(objeto: Recurso) -> dict[str, Any]:
     return {c.key: getattr(objeto, c.key) for c in objeto.__mapper__.column_attrs}
 
 
