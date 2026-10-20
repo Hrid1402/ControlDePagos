@@ -449,3 +449,116 @@ def test_validacion_tipo_categoria_invalido(
         headers=headers,
     )
     assert resp.status_code == 422
+
+
+def test_mover_servicios_a_misma_categoria_falla_400(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Mover servicios con destino_id igual al origen devuelve 400 MISMA_CATEGORIA."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r_crear = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Misma Categoria", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat_id = r_crear.json()["id"]
+
+    r_mover = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_id}/mover-servicios",
+        json={"destino_id": cat_id},
+        headers=headers,
+    )
+    assert r_mover.status_code == 400
+    assert r_mover.json()["code"] == "MISMA_CATEGORIA"
+
+
+def test_mover_servicios_destino_inexistente_o_ajeno_falla_404(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Mover servicios a categoría inexistente o de otro gerente devuelve 404 NO_ENCONTRADO."""
+    import uuid
+
+    gerente_uno = dos_gerentes.uno.gerente
+    gerente_dos = dos_gerentes.dos.gerente
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Origen G1", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_uno),
+    )
+    cat_origen_id = r1.json()["id"]
+
+    r2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Destino G2", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_dos),
+    )
+    cat_ajena_id = r2.json()["id"]
+
+    # Destino inexistente
+    r_inexistente = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_origen_id}/mover-servicios",
+        json={"destino_id": str(uuid.uuid4())},
+        headers=auth_headers(gerente_uno),
+    )
+    assert r_inexistente.status_code == 404
+
+    # Destino de otro gerente
+    r_ajeno = cliente.post(
+        f"{CATEGORIAS_URL}/{cat_origen_id}/mover-servicios",
+        json={"destino_id": cat_ajena_id},
+        headers=auth_headers(gerente_uno),
+    )
+    assert r_ajeno.status_code == 404
+
+
+def test_eliminar_categoria_con_mover_a_ajeno_o_invalido_falla(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Eliminar categoría con mover_a apuntando a sí misma (400) o ajena (404)."""
+    import uuid
+
+    gerente_uno = dos_gerentes.uno.gerente
+    gerente_dos = dos_gerentes.dos.gerente
+    headers_uno = auth_headers(gerente_uno)
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Con Servicio G1", "tipo": "monto_fijo"},
+        headers=headers_uno,
+    )
+    cat_id = r1.json()["id"]
+    cat_obj = db.get(Categoria, cat_id)
+    assert cat_obj is not None
+    crear_servicio_de_prueba(db, gerente_uno, cat_obj, codigo="SRV-MOV-ERR")
+
+    r_ajena = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Destino G2 Borde", "tipo": "monto_fijo"},
+        headers=auth_headers(gerente_dos),
+    )
+    cat_ajena_id = r_ajena.json()["id"]
+
+    # mover_a a sí misma -> 400 MISMA_CATEGORIA
+    r_misma = cliente.delete(f"{CATEGORIAS_URL}/{cat_id}?mover_a={cat_id}", headers=headers_uno)
+    assert r_misma.status_code == 400
+    assert r_misma.json()["code"] == "MISMA_CATEGORIA"
+
+    # mover_a a inexistente -> 404
+    r_inex = cliente.delete(
+        f"{CATEGORIAS_URL}/{cat_id}?mover_a={uuid.uuid4()}", headers=headers_uno
+    )
+    assert r_inex.status_code == 404
+
+    # mover_a a ajena -> 404
+    r_ajeno = cliente.delete(
+        f"{CATEGORIAS_URL}/{cat_id}?mover_a={cat_ajena_id}", headers=headers_uno
+    )
+    assert r_ajeno.status_code == 404
