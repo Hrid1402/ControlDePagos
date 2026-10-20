@@ -14,6 +14,7 @@ ocultarse del esquema.
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -25,11 +26,12 @@ from app.core.database import get_db
 from app.core.dependencias import Origen
 from app.core.seguridad import crear_token
 from app.main import app
-from app.models import Auditoria, Deuda, OrdenPago, Servicio, Usuario
+from app.models import Auditoria, Deuda, OrdenPago, Servicio, SolicitudAprobacion, Usuario
+from app.services.limites import fijar_limite
 from app.services.pagos import iniciar_pago
 from tests.conftest import DosGerentes, nueva_categoria, nueva_deuda, nueva_orden
 
-Recurso = Servicio | Deuda | OrdenPago | Usuario
+Recurso = Servicio | Deuda | OrdenPago | Usuario | SolicitudAprobacion
 
 NO_ENCONTRADO = (404, "NO_ENCONTRADO")
 SIN_PERMISO = (403, "SIN_PERMISO")
@@ -95,6 +97,9 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
         "asistente propia y gerente ajeno: "
         "test_categorias::test_eliminar_categoria_solo_gerente_y_reglas"
     ),
+    # Solicitudes de aprobación (TASK-24): las celdas están en MATRIZ.
+    ("POST", "/api/v1/solicitudes/{solicitud_id}/aprobar"): "MATRIZ",
+    ("POST", "/api/v1/solicitudes/{solicitud_id}/rechazar"): "MATRIZ",
 }
 
 
@@ -109,6 +114,7 @@ class Recursos:
     asistente: Usuario
     # Activarla o eliminarla le funcionaría a su gerente: el rechazo solo viene de quién llama.
     inactiva: Usuario
+    solicitud: SolicitudAprobacion
 
 
 @dataclass(frozen=True)
@@ -170,6 +176,10 @@ def asistente_inactiva(r: Recursos) -> Usuario:
     return r.inactiva
 
 
+def solicitud(r: Recursos) -> SolicitudAprobacion:
+    return r.solicitud
+
+
 ORDENES = ("vista", "aceptar", "rechazar")
 # Solo el gerente gestiona sus asistentes: el de otro equipo no las encuentra y cualquier
 # asistente, de su equipo o de otro, recibe 403 antes de que se busque la cuenta.
@@ -223,6 +233,22 @@ MATRIZ = [
         for actor in ("gerente_propio", "gerente_ajeno")
     ),
     *(
+        Caso(
+            "POST",
+            f"/api/v1/solicitudes/{{solicitud_id}}/{accion}",
+            actor,
+            esperado,
+            solicitud,
+            motivo_de_rechazo if accion == "rechazar" else sin_cuerpo,
+        )
+        for accion in ("aprobar", "rechazar")
+        for actor, esperado in (
+            ("gerente_ajeno", NO_ENCONTRADO),
+            ("asistente_ajena", SIN_PERMISO),
+            ("asistente_propia", SIN_PERMISO),
+        )
+    ),
+    *(
         Caso(metodo, ruta, actor, esperado, objetivo)
         for metodo, ruta, objetivo in GESTION_ASISTENTES
         for actor, esperado in (
@@ -257,6 +283,11 @@ def recursos(db: Session, dos_gerentes: DosGerentes) -> Recursos:
     )
     db.add(inactiva)
     db.flush()
+    fijar_limite(db, uno.gerente.id, por_pago=Decimal("10.00"))
+    por_aprobar = iniciar_pago(
+        db, uno.asistente, nueva_deuda(db, uno.gerente).id, origen=Origen(dispositivo=None, ip=None)
+    )
+    assert por_aprobar.solicitud is not None
     return Recursos(
         servicio=db.get_one(Servicio, pendiente.servicio_id),
         deuda=pendiente,
@@ -264,6 +295,7 @@ def recursos(db: Session, dos_gerentes: DosGerentes) -> Recursos:
         orden=nueva_orden(db, nueva_deuda(db, uno.gerente), asistente=uno.asistente),
         asistente=uno.asistente,
         inactiva=inactiva,
+        solicitud=por_aprobar.solicitud,
     )
 
 
