@@ -71,6 +71,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Historial',
       descripcion: 'Quién hizo qué y cuándo, en tu cuenta y en la de tu asistente.',
       principal: false,
+      pagina: () => import('@/pages/HistorialPage.vue'),
     },
   ],
   asistente: [

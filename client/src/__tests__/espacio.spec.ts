@@ -206,8 +206,8 @@ describe('espacios y avisos de sesión', () => {
         '#secciones-mas [role="menuitem"]:last-child .p-menu-item-content',
       )!
       .click()
-    await flushPromises()
-    expect(router.currentRoute.value.name).toBe('gerente-historial')
+    // Historial ya tiene pantalla propia, que se carga bajo demanda.
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('gerente-historial'))
     expect(wrapper.get('nav[aria-label="Secciones"] li.actual a').text()).toBe('Historial')
     expect(wrapper.get('button[aria-controls="secciones-mas"]').classes()).toContain('activa')
   })
