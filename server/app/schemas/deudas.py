@@ -1,4 +1,4 @@
-"""Esquemas del registro manual de deudas (H11, TASK-38).
+"""Esquemas del registro manual (H11, TASK-38) y del listado de deudas (H36, TASK-45).
 
 El periodo viaja como AAAA-MM y se guarda como el primer día de ese mes (ck_deuda_periodo).
 Aquí no se reciben fecha de emisión, campos de tarjeta o de préstamo (TASK-40) ni el recibo
@@ -8,11 +8,30 @@ adjunto (TASK-84). Tampoco estado ni origen: el registro manual siempre crea una
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from app.core.paginacion import Pagina
+from app.schemas.bandeja import CategoriaBandeja
+
 Moneda = Literal["PEN", "USD"]
+MONEDAS: tuple[Moneda, ...] = get_args(Moneda)
+# Los estados de ck_deuda_estado en el orden de su ciclo de vida, que es el orden por estado.
+EstadoDeuda = Literal[
+    "esperando_recibo",
+    "pendiente",
+    "esperando_aprobacion",
+    "en_proceso",
+    "por_validar",
+    "con_problema",
+    "pagada_parcial",
+    "pagada",
+    "anulada",
+]
+ESTADOS_DEUDA: tuple[EstadoDeuda, ...] = get_args(EstadoDeuda)
+# Sin guion, ascendente; con guion, descendente.
+OrdenListado = Literal["vencimiento", "-vencimiento", "monto", "-monto", "estado", "-estado"]
 # Igual que numeric(12,2): hasta 9 999 999 999.99, siempre positivo.
 Monto = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
 Periodo = Annotated[str, StringConstraints(pattern=r"^[1-9]\d{3}-(0[1-9]|1[0-2])$")]
@@ -67,3 +86,50 @@ class DeudaExistente(BaseModel):
     monto: Decimal | None
     moneda: str
     fecha_vencimiento: date
+
+
+class ItemDeuda(BaseModel):
+    """Fila del listado (CA01). pagado, saldo, vencida y monto_proyectado son calculados. Sin monto
+    (esperando recibo), monto y saldo son null y la estimación va en monto_proyectado, que es null
+    si no hay deuda del mes anterior para estimarla."""
+
+    id: uuid.UUID
+    servicio_id: uuid.UUID
+    empresa: str
+    alias: str | None
+    codigo_suministro: str
+    categoria: CategoriaBandeja
+    periodo: str
+    monto: Decimal | None
+    moneda: str
+    pagado: Decimal
+    saldo: Decimal | None
+    monto_proyectado: Decimal | None
+    fecha_vencimiento: date
+    vencida: bool
+    estado: str
+    numero_recibo: str | None
+
+
+CERO = Decimal("0.00")
+
+
+class TotalesMoneda(BaseModel):
+    """Totales de una moneda sobre todo el filtro, no solo la página (CA08). monto es el importe
+    confirmado; pagado, los abonos validados; saldo, monto menos abonos. Las deudas sin monto no
+    suman a ninguno: se cuentan en sin_monto y su estimación va en proyectado, o en
+    sin_estimacion si no la tienen."""
+
+    cantidad: int = 0
+    monto: Decimal = CERO
+    pagado: Decimal = CERO
+    saldo: Decimal = CERO
+    sin_monto: int = 0
+    proyectado: Decimal = CERO
+    sin_estimacion: int = 0
+
+
+class ListadoDeudasSalida(Pagina[ItemDeuda]):
+    """Página del listado. totales trae siempre PEN y USD, separados: no se convierten ni suman."""
+
+    totales: dict[Moneda, TotalesMoneda]

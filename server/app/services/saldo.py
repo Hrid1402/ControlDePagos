@@ -60,8 +60,9 @@ ESTADOS_CERRADOS = ("pagada", "anulada")
 def aplicado_validado(deuda_id: ColumnExpressionArgument[uuid.UUID]) -> ScalarSelect[Decimal]:
     """Suma de abonos validados de la deuda. Usada con Deuda.id dentro de una consulta sobre
     deuda, queda correlacionada por fila."""
+    # Cero con dos decimales, como numeric(12,2): sin abonos se lee 0.00, no 0.
     return (
-        select(func.coalesce(func.sum(ComprobanteDeuda.monto_aplicado), 0))
+        select(func.coalesce(func.sum(ComprobanteDeuda.monto_aplicado), Decimal("0.00")))
         .join(Comprobante, Comprobante.id == ComprobanteDeuda.comprobante_id)
         .where(ComprobanteDeuda.deuda_id == deuda_id, Comprobante.estado == "validado")
         .correlate_except(ComprobanteDeuda, Comprobante)
