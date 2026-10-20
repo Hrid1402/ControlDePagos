@@ -124,3 +124,105 @@ def test_ca05_pagos_del_gerente_no_tienen_limite(
     assert consumo_mes_pen(db, gerente.id, AHORA_LIMA) == Decimal("0")
 
 
+def test_ca06_superar_limite_crea_solicitud_y_deuda_esperando_aprobacion(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA06: Si supera el límite, crea solicitud de aprobación y la deuda queda esperando."""
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+
+    fijar_limite(db, gerente.id, por_pago=Decimal("100.00"), mensual=Decimal("500.00"))
+    deuda = nueva_deuda(db, gerente, monto="150.00")
+
+    res = iniciar_pago(db, asistente, deuda.id, origen=ORIGEN_PRUEBA)
+    assert res.resultado == ResultadoInicio.REQUIERE_APROBACION
+    assert res.solicitud is not None
+    assert res.solicitud.monto == Decimal("150.00")
+    assert res.solicitud.deuda_id == deuda.id
+    assert res.solicitud.asistente_id == asistente.id
+    assert res.solicitud.estado == "pendiente"
+
+    db.refresh(deuda)
+    assert deuda.estado == "esperando_aprobacion"
+
+
+def test_ca07_gerente_aprueba_solicitud_y_permite_inicio_de_pago(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA07: El gerente aprueba la solicitud y luego la asistente puede iniciar el pago."""
+    from app.services.limites import resolver_solicitud
+
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+
+    fijar_limite(db, gerente.id, por_pago=Decimal("50.00"), mensual=Decimal("500.00"))
+    deuda = nueva_deuda(db, gerente, monto="80.00")
+
+    # 1. Requiere aprobación inicial
+    res_inicio = iniciar_pago(db, asistente, deuda.id, origen=ORIGEN_PRUEBA)
+    assert res_inicio.resultado == ResultadoInicio.REQUIERE_APROBACION
+    assert res_inicio.solicitud is not None
+
+    # 2. Gerente aprueba la solicitud
+    sol_resuelta = resolver_solicitud(db, gerente, res_inicio.solicitud.id, "aprobada")
+    assert sol_resuelta.estado == "aprobada"
+    assert sol_resuelta.resuelta_por == gerente.id
+    assert sol_resuelta.resuelta_en is not None
+
+    # 3. Con la aprobación vigente, la asistente puede iniciar el pago
+    res_segundo = iniciar_pago(db, asistente, deuda.id, origen=ORIGEN_PRUEBA)
+    assert res_segundo.resultado == ResultadoInicio.INICIADO
+    db.refresh(deuda)
+    assert deuda.estado == "en_proceso"
+
+
+def test_ca08_gerente_rechaza_solicitud_con_motivo_opcional_y_notifica(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA08: Al rechazar se guarda el motivo opcional y la asistente es notificada."""
+    from app.models import Notificacion
+    from app.services.limites import resolver_solicitud
+
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+
+    fijar_limite(db, gerente.id, por_pago=Decimal("30.00"))
+    deuda = nueva_deuda(db, gerente, monto="60.00")
+
+    res_inicio = iniciar_pago(db, asistente, deuda.id, origen=ORIGEN_PRUEBA)
+    assert res_inicio.solicitud is not None
+
+    # Rechazar con motivo opcional
+    sol_rechazada = resolver_solicitud(
+        db,
+        gerente,
+        res_inicio.solicitud.id,
+        "rechazada",
+        motivo="Monto no justificado para este mes",
+    )
+    assert sol_rechazada.estado == "rechazada"
+    assert sol_rechazada.motivo == "Monto no justificado para este mes"
+
+    # Verificar notificación para la asistente
+    notif = db.scalar(
+        select(Notificacion).where(
+            Notificacion.usuario_id == asistente.id,
+            Notificacion.deuda_id == deuda.id,
+        )
+    )
+    assert notif is not None
+    assert "rechazó" in notif.mensaje
+
+    # Intentar resolver nuevamente falla con 409
+    with pytest.raises(ErrorApi) as exc:
+        resolver_solicitud(db, gerente, res_inicio.solicitud.id, "aprobada")
+    assert exc.value.status_code == 409
+    assert exc.value.code == "SOLICITUD_YA_RESUELTA"
+
+
