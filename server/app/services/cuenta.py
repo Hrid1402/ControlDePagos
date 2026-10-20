@@ -17,13 +17,17 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
-from app.core.seguridad import hashear_contrasena, verificar_contrasena
+from app.core.seguridad import verificar_contrasena
 from app.core.tiempo import ahora_lima
-from app.models import CambioUsuario, HistorialContrasena, Usuario
+from app.models import CambioUsuario, Usuario
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
+from app.services.contrasenas import (
+    CONTRASENAS_ANTERIORES,
+    actualizar_contrasena,
+    es_reutilizada,
+)
 
 CAMBIOS_USUARIO_POR_MES = 2
-CONTRASENAS_ANTERIORES = 3
 AVISO_USUARIO_NUEVO = "Desde ahora debes ingresar con tu nuevo usuario."
 
 
@@ -139,20 +143,11 @@ def cambiar_contrasena(
             "contrasena_actual",
         )
 
-    anteriores = db.scalars(
-        select(HistorialContrasena.password_hash)
-        .where(HistorialContrasena.usuario_id == usuario.id)
-        .order_by(HistorialContrasena.creado_en.desc(), HistorialContrasena.id.desc())
-        .limit(CONTRASENAS_ANTERIORES)
-    )
-    if any(verificar_contrasena(nueva, h) for h in [usuario.password_hash, *anteriores]):
+    if es_reutilizada(db, usuario, nueva):
         raise contrasena_repetida()
 
     version = usuario.token_version
-    db.add(HistorialContrasena(usuario_id=usuario.id, password_hash=usuario.password_hash))
-    usuario.password_hash = hashear_contrasena(nueva)
-    usuario.contrasena_inicial = False
-    usuario.token_version = version + 1
+    actualizar_contrasena(db, usuario, nueva)
 
     registrar_auditoria(
         db,

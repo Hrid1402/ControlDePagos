@@ -91,7 +91,7 @@ def test_nombres_apellidos_y_correo_son_opcionales(db: Session) -> None:
     assert (gerente.nombres, gerente.apellidos, gerente.correo) == (None, None, None)
 
 
-def test_el_hash_inicial_queda_en_el_historial_como_en_tarea_13(db: Session) -> None:
+def test_la_cuenta_nueva_no_tiene_contrasenas_anteriores(db: Session) -> None:
     gerente = inicializar(db).gerente
 
     historial = list(
@@ -101,7 +101,7 @@ def test_el_hash_inicial_queda_en_el_historial_como_en_tarea_13(db: Session) -> 
             )
         )
     )
-    assert historial == [gerente.password_hash]
+    assert historial == []
 
 
 def test_h01_el_gerente_creado_ingresa_con_sus_credenciales(db: Session) -> None:

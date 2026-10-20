@@ -82,3 +82,18 @@ La contraseña no se muestra, no se registra en la auditoría y no queda en ning
 | 2 | Dato faltante o inválido |
 | 3 | Conflicto con una cuenta existente |
 | 130 | Interrumpido con Ctrl+C |
+
+## Contraseñas e historial
+
+La creación de cuentas, el cambio y el restablecimiento usan la misma regla: mínimo 8
+caracteres, con mayúscula, minúscula, número y símbolo, y máximo 72 bytes UTF-8. Los espacios
+no se recortan. La API devuelve 422 con el campo y un motivo de validación sin exponer la
+contraseña recibida.
+
+El cambio y el restablecimiento rechazan la contraseña actual y las tres anteriores. El hash
+actual vive en usuario; al sustituirlo se agrega al historial y se incrementa token_version.
+Las cuentas nuevas no tienen contraseñas anteriores. Los registros antiguos se conservan:
+el lector omite el hash vigente y hashes repetidos para no reducir la ventana de tres.
+
+No requiere migración ni limpieza de datos existentes. El cambio propio conserva la sesión
+actual mediante un token renovado; el restablecimiento exige iniciar sesión otra vez.
