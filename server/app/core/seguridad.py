@@ -1,4 +1,5 @@
 import secrets
+import string
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,27 @@ def hashear_contrasena(contrasena: str) -> str:
     """Hash bcrypt de la contraseña. bcrypt rechaza más de 72 bytes: quien fija la contraseña
     debe validar su largo antes."""
     return bcrypt.hashpw(contrasena.encode(), bcrypt.gensalt(COSTO_BCRYPT)).decode()
+
+
+def generar_contrasena_segura(longitud: int = 12) -> str:
+    """Genera una contraseña criptográficamente segura de al menos 8 caracteres."""
+    if longitud < 8:
+        longitud = 8
+    letras_minusculas = string.ascii_lowercase
+    letras_mayusculas = string.ascii_uppercase
+    digitos = string.digits
+    simbolos = "!@#$%*-_"
+    alfabeto = letras_minusculas + letras_mayusculas + digitos + simbolos
+
+    caracteres = [
+        secrets.choice(letras_minusculas),
+        secrets.choice(letras_mayusculas),
+        secrets.choice(digitos),
+        secrets.choice(simbolos),
+    ] + [secrets.choice(alfabeto) for _ in range(longitud - 4)]
+
+    secrets.SystemRandom().shuffle(caracteres)
+    return "".join(caracteres)
 
 
 def verificar_contrasena(contrasena: str, password_hash: str) -> bool:
