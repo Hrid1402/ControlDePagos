@@ -42,6 +42,9 @@ class Accion(StrEnum):
     POLITICA_ACEPTADA = "politica_aceptada"
     DEUDA_FIJADA = "deuda_fijada"
     DEUDA_POSPUESTA = "deuda_pospuesta"
+    ORDEN_VISTA = "orden_vista"
+    ORDEN_ACEPTADA = "orden_aceptada"
+    ORDEN_RECHAZADA = "orden_rechazada"
     USUARIO_CAMBIADO = "usuario_cambiado"
     CONTRASENA_CAMBIADA = "contrasena_cambiada"
 

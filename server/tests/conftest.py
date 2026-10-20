@@ -180,14 +180,18 @@ def nueva_orden(
     estado: str = "enviada",
     plazo: datetime | None = None,
     asistente: Usuario | None = None,
+    monto: str | None = None,
 ) -> OrdenPago:
-    """Orden urgente del gerente de la deuda."""
+    """Orden urgente del gerente de la deuda. Sin monto autoriza el monto y la moneda de la
+    deuda, como hace TASK-63 al crearla sin abonos."""
     orden = OrdenPago(
         deuda_id=deuda.id,
         gerente_id=deuda.gerente_id,
         asistente_id=asistente.id if asistente else None,
         estado=estado,
         plazo=plazo,
+        monto=Decimal(monto) if monto is not None else deuda.monto,
+        moneda=deuda.moneda,
     )
     db.add(orden)
     db.flush()

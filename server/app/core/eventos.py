@@ -43,6 +43,12 @@ class TipoEvento(StrEnum):
     SESION_CERRADA = "sesion_cerrada"
     RESINCRONIZAR = "resincronizar"
     PAGO_CANCELADO = "pago_cancelado"
+    # Órdenes urgentes: solo se publican con publicar_evento_orden (app/services/ordenes.py).
+    ORDEN_NUEVA = "orden_nueva"
+    ORDEN_VISTA = "orden_vista"
+    ORDEN_ACEPTADA = "orden_aceptada"
+    ORDEN_RECHAZADA = "orden_rechazada"
+    ORDEN_CANCELADA = "orden_cancelada"
 
 
 @dataclass(frozen=True)

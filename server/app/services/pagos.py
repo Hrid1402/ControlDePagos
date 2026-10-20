@@ -9,9 +9,11 @@ aceptar una orden e iniciar su deuda es una sola transacción (TASK-68) y la rut
 deuda de un lote en su propio savepoint (TASK-79).
 
 Orden de bloqueo, el mismo en toda transacción para no caer en un interbloqueo:
-orden_pago -> limite -> deuda -> solicitud_aprobacion. El límite del gerente se bloquea antes de
-leer el consumo: dos pagos simultáneos del mismo gerente se turnan y el segundo ya ve la reserva
-del primero. Sin fila de límite no hay límite en soles y no hace falta turnarse.
+usuario -> orden_pago -> limite -> deuda -> solicitud_aprobacion. El usuario solo lo bloquean
+aceptar una orden (app/services/ordenes.py) y el traspaso de órdenes al cambiar de asistente
+(TASK-14). El límite del gerente se bloquea antes de leer el consumo: dos pagos simultáneos del
+mismo gerente se turnan y el segundo ya ve la reserva del primero. Sin fila de límite no hay
+límite en soles y no hace falta turnarse.
 """
 
 import uuid
@@ -72,12 +74,11 @@ class MotivoAprobacion(StrEnum):
 
 @dataclass(frozen=True)
 class AutorizacionOrden:
-    """Orden urgente que autoriza el pago de una asistente. orden_pago no guarda importe ni
-    moneda: la moneda autorizada la aporta quien acepta la orden (la que mostró en pantalla) y el
-    importe exacto lo verifica TASK-63/68 antes de llamar a iniciar_pago."""
+    """Orden urgente que autoriza el pago de una asistente: el importe y la moneda exactos que
+    guardó la orden al crearse (TASK-63). Si la deuda cambió de saldo o de moneda, ya no autoriza
+    y hace falta otra orden."""
 
     orden: OrdenPago
-    moneda: str
 
 
 @dataclass(frozen=True)
@@ -147,13 +148,17 @@ def aprobacion_vigente(db: Session, deuda: Deuda, saldo: Decimal) -> SolicitudAp
     )
 
 
-def validar_orden(autorizacion: AutorizacionOrden, deuda: Deuda, usuario: Usuario) -> None:
+def validar_orden(
+    autorizacion: AutorizacionOrden, deuda: Deuda, usuario: Usuario, saldo: Decimal
+) -> None:
+    """Se valida con la deuda ya bloqueada: el saldo comparado es el que se va a reservar."""
     orden = autorizacion.orden
     if (
         orden.estado != "aceptada"
         or orden.deuda_id != deuda.id
         or orden.asistente_id != usuario.id
-        or autorizacion.moneda != deuda.moneda
+        or orden.moneda != deuda.moneda
+        or orden.monto != saldo
     ):
         raise ErrorApi(
             409, "ORDEN_NO_VALIDA", "La orden ya no autoriza este pago. Revisa la deuda de nuevo."
@@ -285,7 +290,7 @@ def iniciar_pago(
     if not es_asistente:
         autorizacion = Autorizacion.GERENTE
     elif orden is not None:
-        validar_orden(orden, deuda, usuario)
+        validar_orden(orden, deuda, usuario, saldo)
         autorizacion = Autorizacion.ORDEN
         detalle["orden_id"] = orden.orden.id
     elif (aprobada := aprobacion_vigente(db, deuda, saldo)) is not None:
