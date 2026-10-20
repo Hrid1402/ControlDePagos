@@ -214,8 +214,13 @@ class Desactivacion:
 
 
 def bloquear_gerente(db: Session, gerente: Usuario) -> None:
-    """Serializa las operaciones del gerente sobre sus asistentes hasta el commit."""
-    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update())
+    """Serializa las operaciones del gerente sobre sus asistentes hasta el commit.
+
+    FOR NO KEY UPDATE y no FOR UPDATE: otra transacción que inserta una fila con llave foránea al
+    gerente, como la auditoría del restablecimiento por enlace, toma FOR KEY SHARE sobre esta fila.
+    Con FOR UPDATE esperaría al gerente mientras el gerente espera a la asistente que ella tiene
+    bloqueada, y PostgreSQL cortaría una de las dos por interbloqueo."""
+    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update(key_share=True))
 
 
 def consulta_asistentes(gerente: Usuario) -> Select[Usuario]:
