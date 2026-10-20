@@ -48,7 +48,7 @@ from app.models import (
 )
 from app.services.auditoria import Accion, registrar_auditoria
 from app.services.pagos import bloquear_deuda
-from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO, aplicado_validado
+from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO, aplicado_validado, vencida
 
 ESTADOS_POR_PAGAR = ("pendiente", "pagada_parcial", "esperando_aprobacion", "con_problema")
 # Solo se pospone lo que nadie está pagando: ocultar un intento en curso haría perderlo de vista.
@@ -145,7 +145,7 @@ def nivel_de(hoy: date) -> ColumnElement[int]:
     return case(
         (OrdenPago.id.is_not(None), 0),
         (Deuda.fijada, 1),
-        (Deuda.fecha_vencimiento < hoy, 2),
+        (vencida(hoy), 2),
         (Deuda.fecha_vencimiento == hoy, 3),
         (Categoria.tipo == "tarjeta", 4),
         else_=5,

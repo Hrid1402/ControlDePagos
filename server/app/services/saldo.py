@@ -4,6 +4,9 @@ Saldo = monto confirmado menos la suma de monto_aplicado de los comprobantes val
 comprobantes procesando, en revisión o rechazados no restan. Ninguno de los dos valores se guarda:
 salen de consultas.
 
+Vencida y la proyección de una deuda sin recibo también se definen aquí una sola vez, para que el
+listado (H36), la bandeja (H15), el calendario (H16) y el panel (H14) cuenten lo mismo.
+
 Consumo PEN del mes de un gerente (límites de H05):
 - Abonos: monto_aplicado de comprobantes validados que subió una asistente del gerente, incluidas
   las anteriores, en deudas PEN.
@@ -21,11 +24,26 @@ el filtro de consumo_mes_pen debe pasar a esa fecha.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import ColumnExpressionArgument, ScalarSelect, exists, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import (
+    ColumnElement,
+    ColumnExpressionArgument,
+    Date,
+    Interval,
+    ScalarSelect,
+    and_,
+    case,
+    cast,
+    exists,
+    func,
+    literal,
+    or_,
+    select,
+)
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy.sql.selectable import LateralFromClause
 
 from app.core.tiempo import ahora_lima, zona_horaria
 from app.models import Comprobante, ComprobanteDeuda, Deuda, Usuario
@@ -35,6 +53,8 @@ MONEDA_LIMITE = "PEN"
 ESTADOS_RESERVA = ("en_proceso", "por_validar")
 # Comprobantes que todavía pueden convertirse en abono.
 ESTADOS_COMPROBANTE_ACTIVO = ("procesando", "en_revision", "por_confirmar")
+# Deudas que ya no se cobran: no vencen ni cuentan como pendientes.
+ESTADOS_CERRADOS = ("pagada", "anulada")
 
 
 def aplicado_validado(deuda_id: ColumnExpressionArgument[uuid.UUID]) -> ScalarSelect[Decimal]:
@@ -47,6 +67,46 @@ def aplicado_validado(deuda_id: ColumnExpressionArgument[uuid.UUID]) -> ScalarSe
         .correlate_except(ComprobanteDeuda, Comprobante)
         .scalar_subquery()
     )
+
+
+def abonos_validados() -> LateralFromClause:
+    """aplicado_validado como columna aplicado de un LATERAL por deuda, para unirlo a una consulta
+    sobre deuda. En un agregado que usa el abono dos veces (pagado y saldo) se evalúa una sola vez
+    por fila; como subconsulta escalar repetida, PostgreSQL la ejecutaría dos veces. OFFSET 0 es
+    la barrera que impide que PostgreSQL aplane el LATERAL y vuelva a repetirla."""
+    return select(aplicado_validado(Deuda.id).label("aplicado")).offset(0).lateral("abonos")
+
+
+def vencida(hoy: date) -> ColumnElement[bool]:
+    """Vencida es un dato calculado, no un estado: el vencimiento es anterior a hoy en Lima y la
+    deuda todavía se cobra (no está pagada ni anulada). Una deuda que vence hoy aún no está
+    vencida. hoy llega como parámetro (hoy_de), no como CURRENT_DATE."""
+    return and_(Deuda.fecha_vencimiento < hoy, Deuda.estado.not_in(ESTADOS_CERRADOS))
+
+
+def proyeccion_sin_recibo() -> ColumnElement[Decimal | None]:
+    """Estimación de una deuda sin monto (esperando recibo), regla de H14: el monto confirmado de la
+    deuda del periodo anterior del mismo servicio, moneda y cuota, si no está anulada. Sin esa
+    referencia es NULL y se muestra sin estimación, nunca como cero. Una deuda con monto no se
+    proyecta. Busca por uq_deuda_periodo."""
+    anterior = aliased(Deuda)
+    mes_anterior = cast(Deuda.periodo - func.make_interval(0, 1, type_=Interval), Date)
+    # Literales en la SQL, no parámetros: así coinciden con la expresión y el predicado del índice.
+    sin_cuota = literal(0, literal_execute=True)
+    monto_anterior = (
+        select(anterior.monto)
+        .where(
+            anterior.servicio_id == Deuda.servicio_id,
+            anterior.periodo == mes_anterior,
+            func.coalesce(anterior.cuota_numero, sin_cuota)
+            == func.coalesce(Deuda.cuota_numero, sin_cuota),
+            anterior.estado != literal("anulada", literal_execute=True),
+            anterior.moneda == Deuda.moneda,
+        )
+        .correlate(Deuda)
+        .scalar_subquery()
+    )
+    return case((Deuda.monto.is_(None), monto_anterior), else_=None)
 
 
 def aplicado_de(db: Session, deuda_id: uuid.UUID) -> Decimal:

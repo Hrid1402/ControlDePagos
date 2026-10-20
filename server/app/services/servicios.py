@@ -25,9 +25,7 @@ from app.models import Categoria, Deuda, Empresa, Recurrencia, Servicio, Usuario
 from app.schemas.servicios import FiltroEstado, ServicioEntrada
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
 from app.services.empresas import cumple_patron, empresa_del_catalogo
-
-# Deudas que ya no se cobran: no cuentan para la advertencia de cambio de código.
-ESTADOS_CERRADOS = ("pagada", "anulada")
+from app.services.saldo import ESTADOS_CERRADOS
 
 CAMPOS_AUDITADOS = (
     "categoria_id",
