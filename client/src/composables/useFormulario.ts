@@ -6,11 +6,11 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { routerKey } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import type { AnyZodObject } from 'zod'
+import type { ZodTypeAny } from 'zod'
 import type { ErrorApi } from '@/types/api'
 
 export interface OpcionesFormulario {
-  esquema: AnyZodObject
+  esquema: ZodTypeAny
   valoresIniciales: Record<string, unknown>
   guardar: (valores: Record<string, unknown>) => Promise<unknown>
   mensajeExito?: string
