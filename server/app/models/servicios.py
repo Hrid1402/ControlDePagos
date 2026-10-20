@@ -31,7 +31,7 @@ class Servicio(ConId, ConActualizado, Base):
             "uq_servicio_codigo",
             "gerente_id",
             text("coalesce(empresa_id::text, lower(empresa_nombre))"),
-            "codigo_suministro",
+            text("upper(codigo_suministro)"),
             unique=True,
             postgresql_where=text("eliminado_en IS NULL"),
         ),
