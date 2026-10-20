@@ -8,6 +8,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+# Estado local del planificador Beat
+celerybeat-schedule*
 
 .env
 .env.*
@@ -18,3 +20,11 @@ uploads/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
+
+# Cobertura de pruebas
+.coverage
+htmlcov/
+
+# Especificaciones y diseños locales: fuente de verdad en Notion.
+docs/

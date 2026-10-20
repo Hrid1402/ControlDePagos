@@ -28,6 +28,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "deptry>=0.25.1",
+    "mypy>=2.4.0",
     "pip-audit>=2.10.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -48,10 +49,17 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.deptry]
 known_first_party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]

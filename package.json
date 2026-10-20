@@ -2,12 +2,29 @@
   "name": "control-de-pagos",
   "private": true,
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "services:up": "docker compose up -d --wait && sh docker/seaweedfs/crear-bucket.sh",
+    "services:down": "docker compose down",
+    "services:reset": "docker compose down -v && pnpm services:up",
+    "services:logs": "docker compose logs -f",
+    "dev": "concurrently -n client,server,worker,beat -c blue,green,yellow,magenta \"pnpm --filter client dev\" \"pnpm dev:server\" \"pnpm worker:server\" \"pnpm beat:server\"",
+    "dev:server": "cd server && uv run uvicorn app.main:app --reload --port 8000",
+    "worker:server": "cd server && FORKED_BY_MULTIPROCESSING=1 uv run watchfiles --filter python 'celery -A app.workers.celery_app:celery_app worker -Q general --concurrency=2 --loglevel=INFO' app",
+    "beat:server": "cd server && uv run celery -A app.workers.celery_app:celery_app beat --schedule=celerybeat-schedule --loglevel=INFO",
+    "init:gerente": "cd server && uv run python -m app.comandos.inicializar_gerente",
+    "lint": "pnpm lint:client && pnpm lint:server",
+    "lint:client": "pnpm --filter client exec eslint . --max-warnings 0 && pnpm --filter client exec prettier --check src && pnpm --filter client run type-check",
+    "lint:server": "cd server && uv run ruff check . && uv run ruff format --check . && uv run mypy app",
+    "test": "pnpm test:client && pnpm test:server",
+    "test:client": "pnpm --filter client exec vitest run --passWithNoTests",
+    "test:server": "cd server && (uv run pytest || [ $? -eq 5 ])",
+    "check": "pnpm lint && pnpm test"
   },
   "packageManager": "pnpm@12.14.0+sha512.c18ba6d87993d3d164cb5e8948f32b2c06ee854487e06cd8d86781342fb3e5bb4634367034711e86802baa9c37bea906ce1929ad08d70884c97d801df13389a6",
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
+    "concurrently": "^10.0.6",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0"
   }

@@ -1,0 +1,216 @@
+"""Servicio común de auditoría (H34): toda acción que cambia datos se registra aquí.
+
+El registro va en la misma transacción que la acción auditada: se agrega y se envía a la base
+con flush, pero el commit lo hace quien llama. Si la acción se deshace, el evento también.
+"""
+
+import logging
+import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
+from enum import StrEnum
+from typing import Any
+
+from sqlalchemy import Select, select
+from sqlalchemy.orm import Session
+
+from app.core.busqueda import contiene
+from app.core.dependencias import Origen, gerente_de
+from app.core.errores import ErrorApi
+from app.core.tiempo import zona_horaria
+from app.models import Auditoria, Usuario
+
+# Registro técnico: eventos que no tienen gerente al que pertenecer.
+logger = logging.getLogger("app.auditoria")
+
+
+class Accion(StrEnum):
+    """Acciones auditadas. Cada historia agrega aquí las suyas."""
+
+    LOGIN_EXITOSO = "login_exitoso"
+    LOGIN_FALLIDO = "login_fallido"
+    CUENTA_CREADA = "cuenta_creada"
+    CUENTA_ACTIVADA = "cuenta_activada"
+    CUENTA_DESACTIVADA = "cuenta_desactivada"
+    CUENTA_ELIMINADA = "cuenta_eliminada"
+    DEUDA_MONTO_CAMBIADO = "deuda_monto_cambiado"
+    DEUDA_ESTADO_CAMBIADO = "deuda_estado_cambiado"
+    CONTRASENA_RESTABLECIDA = "contrasena_restablecida"
+    PAGO_INICIADO = "pago_iniciado"
+    PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
+    APROBACION_SOLICITADA = "aprobacion_solicitada"
+    APROBACION_APROBADA = "aprobacion_aprobada"
+    APROBACION_RECHAZADA = "aprobacion_rechazada"
+    PERFIL_ACTUALIZADO = "perfil_actualizado"
+    POLITICA_ACEPTADA = "politica_aceptada"
+    DEUDA_FIJADA = "deuda_fijada"
+    DEUDA_POSPUESTA = "deuda_pospuesta"
+    ORDEN_VISTA = "orden_vista"
+    ORDEN_ACEPTADA = "orden_aceptada"
+    ORDEN_RECHAZADA = "orden_rechazada"
+    ORDEN_TRASPASADA = "orden_traspasada"
+    ORDEN_CANCELADA = "orden_cancelada"
+    USUARIO_CAMBIADO = "usuario_cambiado"
+    CONTRASENA_CAMBIADA = "contrasena_cambiada"
+    CATEGORIA_CREADA = "categoria_creada"
+    CATEGORIA_ACTUALIZADA = "categoria_actualizada"
+    CATEGORIA_ELIMINADA = "categoria_eliminada"
+    SERVICIO_CREADO = "servicio_creado"
+    SERVICIO_ACTUALIZADO = "servicio_actualizado"
+    SERVICIO_DADO_DE_BAJA = "servicio_dado_de_baja"
+    SERVICIO_REACTIVADO = "servicio_reactivado"
+    DEUDA_CREADA = "deuda_creada"
+
+
+# Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.
+FRAGMENTOS_SECRETOS = (
+    "password",
+    "contrasena",
+    "contraseña",
+    "token",
+    "secret",
+    "clave",
+    "api_key",
+)
+# Claves que contienen un fragmento pero no son secretas.
+CLAVES_PERMITIDAS = frozenset({"token_version"})
+
+
+def es_secreto(clave: str) -> bool:
+    normal = clave.lower()
+    return normal not in CLAVES_PERMITIDAS and any(f in normal for f in FRAGMENTOS_SECRETOS)
+
+
+def limpiar(valor: Any) -> Any:
+    """Quita los secretos y convierte el valor a JSON. Los montos Decimal se guardan como texto
+    para no perder exactitud; un tipo no previsto es un error de programación."""
+    if isinstance(valor, Mapping):
+        limpio = {}
+        for clave, interno in valor.items():
+            if not isinstance(clave, str):
+                raise TypeError(f"Las claves del detalle deben ser texto: {clave!r}.")
+            if not es_secreto(clave):
+                limpio[clave] = limpiar(interno)
+        return limpio
+    if isinstance(valor, list | tuple):
+        return [limpiar(v) for v in valor]
+    if valor is None or isinstance(valor, str | bool | int):
+        return valor
+    if isinstance(valor, Decimal | uuid.UUID):
+        return str(valor)
+    if isinstance(valor, datetime | date | time):
+        return valor.isoformat()
+    raise TypeError(f"El detalle de auditoría no admite valores {type(valor).__name__}.")
+
+
+def diferencias(anterior: Mapping[str, Any], nuevo: Mapping[str, Any]) -> dict[str, Any]:
+    """Campos que cambiaron, con su valor anterior y el nuevo. Omite los secretos."""
+    claves = list(anterior) + [c for c in nuevo if c not in anterior]
+    return {
+        clave: {"anterior": limpiar(anterior.get(clave)), "nuevo": limpiar(nuevo.get(clave))}
+        for clave in claves
+        if not es_secreto(clave) and anterior.get(clave) != nuevo.get(clave)
+    }
+
+
+def nombre_de(usuario: Usuario) -> str:
+    """Nombre que se copia al registro para conservarlo si la cuenta se elimina."""
+    nombres = (usuario.nombres or "").strip()
+    apellidos = (usuario.apellidos or "").strip()
+    if nombres and apellidos:
+        return f"{nombres} {apellidos}"
+    return usuario.username
+
+
+def registrar_auditoria(
+    db: Session,
+    usuario: Usuario,
+    accion: Accion,
+    entidad: str,
+    entidad_id: uuid.UUID | None,
+    detalle: Mapping[str, Any] | None = None,
+    *,
+    origen: Origen,
+) -> Auditoria:
+    """Inserta un evento de auditoría. entidad es el nombre de la tabla afectada."""
+    gerente_id = gerente_de(usuario)
+    if gerente_id is None:
+        raise ValueError("No se puede auditar a una asistente sin gerente.")
+    registro = Auditoria(
+        gerente_id=gerente_id,
+        usuario_id=usuario.id,
+        usuario_nombre=nombre_de(usuario),
+        accion=accion.value,
+        entidad=entidad,
+        entidad_id=entidad_id,
+        detalle=limpiar(detalle or {}),
+        dispositivo=origen.dispositivo,
+        ip=origen.ip,
+    )
+    db.add(registro)
+    db.flush()
+    return registro
+
+
+def registrar_login_desconocido(origen: Origen) -> None:
+    """Ingreso con un usuario que no existe. No va a la tabla porque no hay gerente al que
+    asignarlo; va al registro técnico. No recibe el nombre escrito: podría ser una contraseña
+    escrita en el campo equivocado."""
+    dispositivo = origen.dispositivo
+    if dispositivo is not None:
+        # El User-Agent lo escribe el cliente: sin saltos de línea no puede fingir otra entrada.
+        dispositivo = dispositivo.replace("\r", "").replace("\n", "")
+    logger.warning(
+        "Ingreso fallido con una cuenta desconocida (ip=%s, dispositivo=%r)",
+        origen.ip,
+        dispositivo,
+        extra={"evento": "login_desconocido"},
+    )
+
+
+def consulta_historial(usuario: Usuario) -> Select[Auditoria]:
+    """Historial global del gerente, del más reciente al más antiguo. La asistente no tiene
+    acceso; el detalle de una deuda ofrece aparte solo sus eventos autorizados."""
+    if usuario.rol != "gerente":
+        raise ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
+    return (
+        select(Auditoria)
+        .where(Auditoria.gerente_id == usuario.id)
+        .order_by(Auditoria.creado_en.desc(), Auditoria.id.desc())
+    )
+
+
+@dataclass(frozen=True)
+class FiltrosHistorial:
+    usuario: str | None = None
+    accion: str | None = None
+    desde: date | None = None
+    hasta: date | None = None
+
+
+def consulta_historial_filtrado(gerente: Usuario, filtros: FiltrosHistorial) -> Select[Auditoria]:
+    """Aplica los mismos filtros al listado y a la exportación.
+
+    Un UUID busca la cuenta actual; un nombre permite encontrar registros de cuentas
+    eliminadas, cuyo usuario_id se vuelve NULL pero cuyo nombre queda conservado.
+    Las fechas de la interfaz son días completos en la zona configurada.
+    """
+    consulta = consulta_historial(gerente)
+    if filtros.usuario:
+        try:
+            usuario_id = uuid.UUID(filtros.usuario)
+        except ValueError:
+            consulta = consulta.where(contiene(Auditoria.usuario_nombre, filtros.usuario))
+        else:
+            consulta = consulta.where(Auditoria.usuario_id == usuario_id)
+    if filtros.accion:
+        consulta = consulta.where(Auditoria.accion == filtros.accion)
+    if filtros.desde:
+        inicio = datetime.combine(filtros.desde, time.min, tzinfo=zona_horaria())
+        consulta = consulta.where(Auditoria.creado_en >= inicio.astimezone(UTC))
+    if filtros.hasta:
+        fin = datetime.combine(filtros.hasta + timedelta(days=1), time.min, tzinfo=zona_horaria())
+        consulta = consulta.where(Auditoria.creado_en < fin.astimezone(UTC))
+    return consulta

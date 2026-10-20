@@ -1,11 +1,18 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { RouterView } from 'vue-router'
+import { defineAsyncComponent, inject } from 'vue'
+import { controlSesionKey } from './services/controlSesion'
+import Toast from 'primevue/toast'
+import ConfirmDialog from 'primevue/confirmdialog'
+
+const control = inject(controlSesionKey, null)
+const EstadoSesion = defineAsyncComponent(() => import('./components/EstadoSesion.vue'))
+</script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
+  <RouterView />
+  <EstadoSesion v-if="control?.sesion.token" />
+  <!-- El aviso no se lleva el foco: quien guarda con teclado sigue en su formulario. -->
+  <Toast :close-button-props="{ autofocus: false }" />
+  <ConfirmDialog />
 </template>
-
-<style scoped></style>

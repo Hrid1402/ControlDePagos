@@ -1,0 +1,156 @@
+name: Salud de dev
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: salud-dev
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  client:
+    name: Client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec eslint . --max-warnings 0
+      - run: pnpm exec prettier --check src
+      - run: pnpm run type-check
+      - run: pnpm exec vitest run --coverage --coverage.thresholds.lines=70 --passWithNoTests
+      - run: pnpm run build-only
+
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: control_pagos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/control_pagos_test
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/control_pagos_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: clave-ci-clave-ci-clave-ci-clave-ci
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      SMTP_FROM: no-responder@controldepagos.local
+      S3_ENDPOINT: http://localhost:8333
+      S3_REGION: us-east-1
+      S3_BUCKET: control-pagos
+      S3_ACCESS_KEY: ci
+      S3_SECRET_KEY: ci
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv lock --check && uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+      - name: Migraciones
+        run: |
+          if [ -f alembic.ini ]; then
+            uv run alembic upgrade head
+            uv run alembic downgrade base
+            uv run alembic upgrade head
+            uv run alembic check
+          else
+            echo "Sin migraciones todavía."
+          fi
+      - name: Pruebas
+        run: |
+          if find tests -name "test_*.py" | grep -q .; then uv run pytest --cov=app --cov-fail-under=70; else echo "Sin pruebas todavía."; fi
+
+  aviso:
+    name: Aviso
+    needs: [client, server]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v8
+        env:
+          CLIENT: ${{ needs.client.result }}
+          SERVER: ${{ needs.server.result }}
+        with:
+          github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const commit = context.payload.head_commit;
+            const partes = [];
+            if (process.env.CLIENT === 'failure') partes.push('client');
+            if (process.env.SERVER === 'failure') partes.push('server');
+            const detalle = [
+              `El cambio rompió la revisión de ${partes.join(' y ')}.`,
+              '',
+              `- Commit: ${context.sha.slice(0, 7)} ${commit.message.split('\n')[0]}`,
+              `- Autor: ${commit.author.name}`,
+              `- Detalle: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+            const abiertos = await github.rest.issues.listForRepo({ owner, repo, labels: 'dev-roto', state: 'open' });
+            if (abiertos.data.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: abiertos.data[0].number, body: detalle });
+            } else {
+              await github.rest.issues.create({
+                owner, repo,
+                title: `dev está roto desde el commit ${context.sha.slice(0, 7)}`,
+                body: detalle,
+                labels: ['dev-roto'],
+              });
+            }
+
+  recuperado:
+    name: Recuperado
+    needs: [client, server]
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const abiertos = await github.rest.issues.listForRepo({ owner, repo, labels: 'dev-roto', state: 'open' });
+            for (const issue of abiertos.data) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: `dev volvió a pasar la revisión con el commit ${context.sha.slice(0, 7)}.`,
+              });
+              await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });
+            }

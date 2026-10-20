@@ -1,0 +1,18 @@
+# La imagen nunca lleva variables locales: pydantic leería el .env del directorio de trabajo.
+.env
+.env.*
+
+.venv/
+tests/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+celerybeat-schedule*
+.lintstagedrc.mjs
+Dockerfile
+.dockerignore
+railway*.json

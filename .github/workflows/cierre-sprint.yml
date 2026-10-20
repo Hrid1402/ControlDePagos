@@ -1,0 +1,23 @@
+name: Cierre de sprint
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag y release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ secrets.HRID_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          ultimo=$(git tag --list 'sprint-*' | sed 's/sprint-//' | sort -n | tail -1)
+          siguiente=$(( ${ultimo:-0} + 1 ))
+          gh release create "sprint-$siguiente" --target main --title "Sprint $siguiente" --generate-notes

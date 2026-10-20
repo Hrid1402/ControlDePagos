@@ -1,0 +1,99 @@
+@font-face {
+  font-family: 'Literata';
+  src: url('/brand/deconsta/fonts/Literata.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Manrope';
+  src: url('/brand/deconsta/fonts/Manrope.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+:root {
+  font-family: 'Manrope', sans-serif;
+  color: #f1f4f1;
+  background: #075a50;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+/* Tokens de Deconsta. La mesa es el verde de fondo; la hoja, el papel donde se trabaja. Los
+   contrastes de texto cumplen WCAG AA sobre la superficie indicada en cada comentario. */
+:root {
+  --deconsta-primary: #075a50;
+  --deconsta-primary-hondo: #03473f;
+  --deconsta-ink: #192c29;
+  --deconsta-paper: #f1f4f1;
+  --deconsta-paper-claro: #fafbfa;
+  --deconsta-muted: #52665f; /* 5,6:1 sobre papel */
+  --deconsta-linea: #bccbc5; /* solo divisores, no bordes de controles */
+  --deconsta-realce: #e3eeea;
+  --deconsta-sobre-mesa: #d3e1dc; /* texto secundario sobre la mesa, 5,4:1 */
+  --deconsta-error: #922838;
+  --deconsta-error-fondo: #fceeed;
+  --deconsta-aviso: #6b4400;
+  --deconsta-aviso-fondo: #fbf1dc;
+
+  --texto-xs: 0.8125rem;
+  --texto-sm: 0.875rem;
+  --texto-base: 1rem;
+  --texto-md: 1.125rem;
+  --texto-lg: 1.375rem;
+  --texto-xl: clamp(2rem, 1.6rem + 1.6vw, 2.75rem);
+
+  --radio-control: 8px;
+  --radio-hoja: 5px 44px 5px 5px;
+  --margen-mesa: clamp(12px, 2.2vw, 32px);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+/* Campos desactivados con el papel de la marca, no con el gris azulado del tema base. */
+:root .p-inputtext:disabled,
+select:disabled {
+  background: var(--deconsta-realce);
+  color: var(--deconsta-muted);
+  opacity: 1;
+}
+
+/* El rojo de peligro del tema no llega a 4,5:1 sobre el papel: se usa el de la marca. */
+:root .p-button-danger.p-button-outlined,
+:root .p-button-danger.p-button-text {
+  color: var(--deconsta-error);
+  border-color: var(--deconsta-error);
+}
+:root .p-button-danger:not(.p-button-outlined):not(.p-button-text) {
+  background: var(--deconsta-error);
+  border-color: var(--deconsta-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
