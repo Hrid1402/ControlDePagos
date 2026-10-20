@@ -105,7 +105,8 @@ class Deuda(ConId, ConActualizado, Base):
     prestamo_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("prestamo.id"), index=True)
     cuota_numero: Mapped[int | None] = mapped_column(SmallInteger)
     periodo: Mapped[date]
-    monto: Mapped[Decimal]
+    # NULL solo en esperando_recibo o anulada (ck_deuda_monto): el importe aún no se conoce.
+    monto: Mapped[Decimal | None]
     moneda: Mapped[str] = mapped_column(server_default=text("'PEN'"))
     fecha_emision: Mapped[date | None]
     fecha_vencimiento: Mapped[date]
