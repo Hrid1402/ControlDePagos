@@ -46,6 +46,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Servicios',
       descripcion: 'Los servicios que pagas cada mes, con su empresa y código.',
       principal: true,
+      pagina: () => import('@/pages/ServiciosPage.vue'),
     },
     {
       clave: 'asistentes',
@@ -101,6 +102,13 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Comprobantes',
       descripcion: 'Los comprobantes que subiste y el resultado de su validación.',
       principal: true,
+    },
+    {
+      clave: 'servicios',
+      etiqueta: 'Servicios',
+      descripcion: 'Los servicios de tu gerente: regístralos y mantenlos al día.',
+      principal: false,
+      pagina: () => import('@/pages/ServiciosPage.vue'),
     },
   ],
 }
