@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     smtp_host: str
     smtp_port: int
     smtp_from: str
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_tls: bool = False
 
     s3_endpoint: str
     s3_region: str
