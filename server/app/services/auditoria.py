@@ -40,6 +40,8 @@ class Accion(StrEnum):
     APROBACION_SOLICITADA = "aprobacion_solicitada"
     PERFIL_ACTUALIZADO = "perfil_actualizado"
     POLITICA_ACEPTADA = "politica_aceptada"
+    DEUDA_FIJADA = "deuda_fijada"
+    DEUDA_POSPUESTA = "deuda_pospuesta"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.
