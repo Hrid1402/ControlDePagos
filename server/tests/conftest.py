@@ -26,6 +26,7 @@ from app.models import (  # noqa: E402
     Comprobante,
     ComprobanteDeuda,
     Deuda,
+    OrdenPago,
     Servicio,
     Usuario,
 )
@@ -94,6 +95,13 @@ def publicados(monkeypatch: pytest.MonkeyPatch) -> list[tuple[uuid.UUID, Evento]
     return salida
 
 
+def nueva_categoria(db: Session, gerente: Usuario, tipo: str = "servicio_variable") -> Categoria:
+    categoria = Categoria(gerente_id=gerente.id, nombre=f"Cat {uuid.uuid4().hex}", tipo=tipo)
+    db.add(categoria)
+    db.flush()
+    return categoria
+
+
 def nueva_deuda(
     db: Session,
     gerente: Usuario,
@@ -101,12 +109,14 @@ def nueva_deuda(
     moneda: str = "PEN",
     estado: str = "pendiente",
     fecha_vencimiento: date = date(2026, 10, 25),
+    tipo_categoria: str = "servicio_variable",
+    categoria: Categoria | None = None,
 ) -> Deuda:
-    """Deuda con su propio servicio y categoría, para no chocar con las unicidades por gerente."""
+    """Deuda con su propio servicio y, si no se indica, su propia categoría, para no chocar con
+    las unicidades por gerente."""
     marca = uuid.uuid4().hex
-    categoria = Categoria(gerente_id=gerente.id, nombre=f"Cat {marca}", tipo="servicio_variable")
-    db.add(categoria)
-    db.flush()
+    if categoria is None:
+        categoria = nueva_categoria(db, gerente, tipo_categoria)
     servicio = Servicio(
         gerente_id=gerente.id,
         categoria_id=categoria.id,
@@ -162,3 +172,23 @@ def nuevo_comprobante(
     )
     db.flush()
     return comprobante
+
+
+def nueva_orden(
+    db: Session,
+    deuda: Deuda,
+    estado: str = "enviada",
+    plazo: datetime | None = None,
+    asistente: Usuario | None = None,
+) -> OrdenPago:
+    """Orden urgente del gerente de la deuda."""
+    orden = OrdenPago(
+        deuda_id=deuda.id,
+        gerente_id=deuda.gerente_id,
+        asistente_id=asistente.id if asistente else None,
+        estado=estado,
+        plazo=plazo,
+    )
+    db.add(orden)
+    db.flush()
+    return orden
