@@ -562,3 +562,135 @@ def test_eliminar_categoria_con_mover_a_ajeno_o_invalido_falla(
         f"{CATEGORIAS_URL}/{cat_id}?mover_a={cat_ajena_id}", headers=headers_uno
     )
     assert r_ajeno.status_code == 404
+
+
+def test_actualizar_categoria_conserva_su_nombre_y_rechaza_colision_con_otra(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Actualizar permite conservar el mismo nombre y rechaza el nombre de otra categoría."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicio Agua", "tipo": "servicio_variable"},
+        headers=headers,
+    )
+    cat1_id = r1.json()["id"]
+
+    r2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicio Luz", "tipo": "servicio_variable"},
+        headers=headers,
+    )
+    cat2_id = r2.json()["id"]
+
+    # 1. Conservar mismo nombre cambiando color -> 200 OK
+    r_conserva = cliente.put(
+        f"{CATEGORIAS_URL}/{cat1_id}",
+        json={"nombre": "Servicio Agua", "color": "#06B6D4"},
+        headers=headers,
+    )
+    assert r_conserva.status_code == 200
+    assert r_conserva.json()["color"] == "#06B6D4"
+
+    # 2. Mismo nombre en mayúsculas -> 200 OK
+    r_mayusc = cliente.put(
+        f"{CATEGORIAS_URL}/{cat1_id}",
+        json={"nombre": "SERVICIO AGUA"},
+        headers=headers,
+    )
+    assert r_mayusc.status_code == 200
+    assert r_mayusc.json()["nombre"] == "SERVICIO AGUA"
+
+    # 3. Intentar renombrar cat2 al nombre de cat1 -> 409 CATEGORIA_DUPLICADA
+    r_duplicada = cliente.put(
+        f"{CATEGORIAS_URL}/{cat2_id}",
+        json={"nombre": "servicio agua"},
+        headers=headers,
+    )
+    assert r_duplicada.status_code == 409
+    assert r_duplicada.json()["code"] == "CATEGORIA_DUPLICADA"
+
+
+def test_ordenamiento_precargadas_primero_y_alfabetico(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Las categorías se listan ordenadas: precargadas primero, y luego alfabéticamente."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    # Crear categoría precargada y personalizadas
+    cat_precargada = Categoria(
+        gerente_id=gerente.id,
+        nombre="Z - Precargada",
+        color="#64748B",
+        icono="pi-tag",
+        tipo="monto_fijo",
+        precargada=True,
+    )
+    db.add(cat_precargada)
+    db.commit()
+
+    cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "B - Personalizada", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "A - Personalizada", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+
+    r = cliente.get(CATEGORIAS_URL, headers=headers)
+    assert r.status_code == 200
+    nombres = [c["nombre"] for c in r.json()]
+
+    # La precargada va primero a pesar de empezar con Z
+    assert nombres[0] == "Z - Precargada"
+    # Las personalizadas siguen orden alfabético
+    assert nombres[1] == "A - Personalizada"
+    assert nombres[2] == "B - Personalizada"
+
+
+def test_categoria_con_servicios_dados_de_baja_exige_mover_por_integridad(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """Incluso con servicios dados de baja, exige moverlos para preservar llaves foráneas."""
+    gerente = dos_gerentes.uno.gerente
+    headers = auth_headers(gerente)
+
+    r_crear1 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Servicios Antiguos", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat1_id = r_crear1.json()["id"]
+    cat1_obj = db.get(Categoria, cat1_id)
+    assert cat1_obj is not None
+
+    r_crear2 = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Archivo Historico", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    cat2_id = r_crear2.json()["id"]
+
+    # Agregar servicio inactivo (dado de baja)
+    crear_servicio_de_prueba(db, gerente, cat1_obj, codigo="OLD-999", activo=False)
+
+    # 1. Eliminar sin mover_a -> 409 CATEGORIA_CON_SERVICIOS
+    r_del_fallo = cliente.delete(f"{CATEGORIAS_URL}/{cat1_id}", headers=headers)
+    assert r_del_fallo.status_code == 409
+    assert r_del_fallo.json()["code"] == "CATEGORIA_CON_SERVICIOS"
+
+    # 2. Eliminar con mover_a -> 200 OK y traspasa los servicios dados de baja
+    r_del_ok = cliente.delete(f"{CATEGORIAS_URL}/{cat1_id}?mover_a={cat2_id}", headers=headers)
+    assert r_del_ok.status_code == 200
+    assert r_del_ok.json()["servicios_movidos"] == 1
