@@ -34,7 +34,7 @@ export function normalizarError(error: unknown): ErrorApi {
 
 export function crearHttp(opciones: {
   obtenerToken: () => string | null
-  alNoAutenticado: () => void
+  alNoAutenticado: (error: ErrorApi) => void
 }): AxiosInstance {
   const instancia = axios.create({
     baseURL: import.meta.env.VITE_API_URL || '/api/v1',
@@ -53,7 +53,7 @@ export function crearHttp(opciones: {
       // Un 401 tardío de la sesión anterior no debe cerrar una sesión recién iniciada.
       const enviado = axios.isAxiosError(error) ? error.config?.headers?.get('Authorization') : null
       if (normalizado.status === 401 && token && enviado === `Bearer ${token}`)
-        opciones.alNoAutenticado()
+        opciones.alNoAutenticado(normalizado)
       return Promise.reject(normalizado)
     },
   )
@@ -62,5 +62,5 @@ export function crearHttp(opciones: {
 
 export const http = crearHttp({
   obtenerToken: () => useSesionStore().token,
-  alNoAutenticado: () => useSesionStore().cerrar(),
+  alNoAutenticado: (error) => useSesionStore().cerrar(error.code),
 })
