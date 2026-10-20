@@ -45,6 +45,8 @@ class Accion(StrEnum):
     ORDEN_VISTA = "orden_vista"
     ORDEN_ACEPTADA = "orden_aceptada"
     ORDEN_RECHAZADA = "orden_rechazada"
+    USUARIO_CAMBIADO = "usuario_cambiado"
+    CONTRASENA_CAMBIADA = "contrasena_cambiada"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.
