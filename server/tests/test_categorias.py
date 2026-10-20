@@ -384,3 +384,68 @@ def test_aislamiento_entre_gerentes(
     # Gerente dos no puede eliminarla
     r_del = cliente.delete(f"{CATEGORIAS_URL}/{cat_uno_id}", headers=auth_headers(gerente_dos))
     assert r_del.status_code == 404
+
+
+def test_validacion_nombre_categoria_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Rechaza nombres vacíos, solo espacios o que superan los 40 caracteres (422)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # 1. Nombre vacío
+    r_vacio = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_vacio.status_code == 422
+
+    # 2. Solo espacios
+    r_espacios = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "    ", "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_espacios.status_code == 422
+
+    # 3. Supera 40 caracteres
+    r_largo = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "A" * 41, "tipo": "monto_fijo"},
+        headers=headers,
+    )
+    assert r_largo.status_code == 422
+
+
+def test_validacion_color_hex_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Valida que el color cumpla con el formato hexadecimal #RRGGBB (422 si no cumple)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # Colores inválidos
+    for color_invalido in ["rojo", "#123", "#GGGGGG", "123456", "#1234567"]:
+        resp = cliente.post(
+            CATEGORIAS_URL,
+            json={"nombre": "Cat Color", "color": color_invalido, "tipo": "monto_fijo"},
+            headers=headers,
+        )
+        assert resp.status_code == 422, f"Se esperaba 422 para color {color_invalido}"
+
+
+def test_validacion_tipo_categoria_invalido(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Valida que el tipo de categoría pertenezca a los tipos permitidos (422 si no)."""
+    headers = auth_headers(dos_gerentes.uno.gerente)
+
+    # Tipo no reconocido
+    resp = cliente.post(
+        CATEGORIAS_URL,
+        json={"nombre": "Cat Tipo", "tipo": "tipo_desconocido"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
