@@ -132,7 +132,10 @@ pnpm beat:server     # solo Beat, en otra terminal
 ```
 
 El worker escucha la cola `general` con dos procesos y se reinicia solo cuando cambia un archivo
-de `server/app`. Beat no se reinicia solo: al cambiar `horarios.py`, detenlo y arráncalo otra
+de `server/app`. En macOS los procesos del worker se crean con spawn en lugar de fork, y Celery
+solo los prepara para ejecutar tareas si existe la variable `FORKED_BY_MULTIPROCESSING=1`, que
+`pnpm worker:server` ya define. Si arrancas `celery worker` a mano en macOS, defínela tú; sin
+ella toda tarea falla con `not enough values to unpack`. En Linux no hace falta. Beat no se reinicia solo: al cambiar `horarios.py`, detenlo y arráncalo otra
 vez. Beat guarda su estado en `server/celerybeat-schedule*`, que no se sube al repositorio.
 
 Para comprobar que funcionan, espera a que corra el latido (cada 5 minutos, a las :00, :05,
