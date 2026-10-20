@@ -1,9 +1,10 @@
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, StringConstraints, model_validator
+from email_validator import EmailNotValidError, validate_email
+from pydantic import BaseModel, StringConstraints, field_validator, model_validator
 
 PATRON_LETRAS = r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$"
 PATRON_CELULAR = r"^9\d{8}$"
@@ -28,6 +29,22 @@ class ActualizarPerfilEntrada(BaseModel):
     tipo_documento: Literal["dni", "ce", "pasaporte"] | None = None
     numero_documento: str | None = None
     politica_version: str | None = None
+
+    @field_validator("correo")
+    @classmethod
+    def validar_correo(cls, correo: str | None) -> str | None:
+        """CA05: si llega, el correo no puede quedar vacío y debe tener formato válido. Si no
+        llega, se conserva el registrado."""
+        if correo is None:
+            return None
+        correo = correo.strip()
+        if not correo:
+            raise ValueError("El correo es obligatorio.")
+        try:
+            validate_email(correo, check_deliverability=False)
+        except EmailNotValidError as error:
+            raise ValueError("Revisa el formato del correo.") from error
+        return correo
 
     @model_validator(mode="after")
     def validar_documento(self) -> Self:
@@ -54,7 +71,20 @@ class ActualizarPerfilEntrada(BaseModel):
 class AceptarPoliticaEntrada(BaseModel):
     """Confirmación de lectura y aceptación de la política de privacidad."""
 
-    version: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = "1.0"
+    version: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class SeccionPolitica(BaseModel):
+    titulo: str
+    parrafos: list[str]
+
+
+class PoliticaSalida(BaseModel):
+    """Política de privacidad vigente que el usuario debe aceptar (CA10)."""
+
+    version: str
+    vigente_desde: date
+    secciones: list[SeccionPolitica]
 
 
 class PerfilSalida(BaseModel):
@@ -71,5 +101,9 @@ class PerfilSalida(BaseModel):
     numero_documento: str | None
     politica_version: str | None
     politica_aceptada_en: datetime | None
+    # CA07 y CA18, y la versión vigente para saber si falta aceptar la política (CA10).
+    cambios_restantes: int
+    contrasena_inicial: bool
+    politica_vigente: str
 
     model_config = {"from_attributes": True}
