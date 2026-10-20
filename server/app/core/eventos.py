@@ -6,11 +6,15 @@ de su destinatario (app/core/conexiones.py). Si la transacción se deshace, el e
 
 Publicar es el último paso y no puede deshacer lo ya confirmado: si Redis falla, se registra en
 el log y el cliente recupera el estado por la API al reconectar o al recibir resincronizar.
+
+El mismo mecanismo ejecuta otras acciones tras el commit con ejecutar_tras_commit; así encola las
+tareas de Celery app/workers/encolar.py. Eventos y acciones salen en el orden en que se encolaron.
 """
 
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -29,10 +33,13 @@ logger = logging.getLogger("app.tiempo_real")
 CANAL = "control_pagos:eventos"
 ESPERA_REDIS_SEGUNDOS = 2
 
-# Claves en Session.info: eventos encolados y, por cada savepoint abierto, cuántos había al
-# abrirlo, para descartar solo los del savepoint si este se deshace.
+# Claves en Session.info: acciones encoladas (publicar un evento, encolar una tarea) y, por cada
+# savepoint abierto, cuántas había al abrirlo, para descartar solo las del savepoint si este se
+# deshace.
 PENDIENTES = "eventos_pendientes"
 MARCAS = "eventos_marcas"
+
+Accion = Callable[[], object]
 
 
 class TipoEvento(StrEnum):
@@ -79,9 +86,16 @@ def cliente_redis() -> redis.Redis:
     )
 
 
+def ejecutar_tras_commit(db: Session, accion: Accion) -> None:
+    """Ejecuta accion solo si la transacción de db se confirma. La acción no puede deshacer lo
+    confirmado: debe atrapar y registrar sus propios fallos; si aun así lanza, se registra en el
+    log y siguen las demás."""
+    db.info.setdefault(PENDIENTES, []).append(accion)
+
+
 def publicar_tras_commit(db: Session, usuario_id: uuid.UUID, evento: Evento) -> None:
     """Encola un evento para un usuario; sale solo si la transacción de db se confirma."""
-    db.info.setdefault(PENDIENTES, []).append((usuario_id, evento))
+    ejecutar_tras_commit(db, lambda: publicar(usuario_id, evento))
 
 
 def avisar_cierre_sesion(db: Session, usuario_id: uuid.UUID) -> None:
@@ -117,8 +131,11 @@ def enviar_pendientes(sesion: Session) -> None:
     # SQLAlchemy también avisa al liberar un savepoint; los eventos esperan al commit raíz.
     if sesion.in_nested_transaction():
         return
-    for usuario_id, evento in sesion.info.pop(PENDIENTES, []):
-        publicar(usuario_id, evento)
+    for accion in sesion.info.pop(PENDIENTES, []):
+        try:
+            accion()
+        except Exception:
+            logger.exception("Falló una acción posterior al commit")
 
 
 @event.listens_for(Session, "after_soft_rollback")

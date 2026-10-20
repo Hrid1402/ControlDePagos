@@ -13,6 +13,7 @@ from app.core.eventos import (
     Evento,
     TipoEvento,
     avisar_cierre_sesion,
+    ejecutar_tras_commit,
     publicar,
     publicar_tras_commit,
 )
@@ -131,3 +132,56 @@ def test_si_redis_falla_el_commit_se_conserva_y_queda_en_el_log(
     assert gerente.nombres == "Ana"
     assert str(evento.id) in caplog.text
     assert "No se pudo publicar" in caplog.text
+
+
+def test_la_accion_se_ejecuta_solo_despues_del_commit_y_en_orden(
+    db: Session, dos_gerentes: DosGerentes, publicados: Publicados
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    orden: list[str] = []
+    publicar_tras_commit(db, gerente.id, Evento(TipoEvento.NOTIFICACION))
+    ejecutar_tras_commit(db, lambda: orden.append(f"accion tras {len(publicados)} eventos"))
+    db.flush()
+    assert orden == []
+    db.commit()
+    assert orden == ["accion tras 1 eventos"]
+    assert len(publicados) == 1
+
+
+def test_el_rollback_descarta_la_accion(db: Session, dos_gerentes: DosGerentes) -> None:
+    ejecutadas: list[int] = []
+    ejecutar_tras_commit(db, lambda: ejecutadas.append(1))
+    db.rollback()
+    db.commit()
+    assert ejecutadas == []
+
+
+def test_deshacer_un_savepoint_descarta_solo_sus_acciones(db: Session) -> None:
+    ejecutadas: list[str] = []
+    ejecutar_tras_commit(db, lambda: ejecutadas.append("antes"))
+    savepoint = db.begin_nested()
+    ejecutar_tras_commit(db, lambda: ejecutadas.append("dentro"))
+    savepoint.rollback()
+    db.commit()
+    assert ejecutadas == ["antes"]
+
+
+def test_una_accion_que_falla_no_frena_las_demas_y_queda_en_el_log(
+    db: Session,
+    dos_gerentes: DosGerentes,
+    publicados: Publicados,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def falla() -> None:
+        raise RuntimeError("fallo de prueba")
+
+    gerente = dos_gerentes.uno.gerente
+    gerente.nombres = "Ana"
+    ejecutar_tras_commit(db, falla)
+    publicar_tras_commit(db, gerente.id, Evento(TipoEvento.NOTIFICACION))
+    with caplog.at_level(logging.ERROR, logger="app.tiempo_real"):
+        db.commit()
+    db.expire_all()
+    assert gerente.nombres == "Ana"
+    assert len(publicados) == 1
+    assert "Falló una acción posterior al commit" in caplog.text
