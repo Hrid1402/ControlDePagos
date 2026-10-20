@@ -77,6 +77,17 @@ select:disabled {
   opacity: 1;
 }
 
+/* El rojo de peligro del tema no llega a 4,5:1 sobre el papel: se usa el de la marca. */
+:root .p-button-danger.p-button-outlined,
+:root .p-button-danger.p-button-text {
+  color: var(--deconsta-error);
+  border-color: var(--deconsta-error);
+}
+:root .p-button-danger:not(.p-button-outlined):not(.p-button-text) {
+  background: var(--deconsta-error);
+  border-color: var(--deconsta-error);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
