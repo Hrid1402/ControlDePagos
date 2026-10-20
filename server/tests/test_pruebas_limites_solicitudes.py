@@ -226,3 +226,144 @@ def test_ca08_gerente_rechaza_solicitud_con_motivo_opcional_y_notifica(
     assert exc.value.code == "SOLICITUD_YA_RESUELTA"
 
 
+def test_ca09_recordatorios_solicitud_urgente_si_deuda_vence_hoy(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA09: Si no se responde, envía recordatorio; urgente si la deuda vence ese día."""
+    from app.models import Notificacion
+    from app.services.limites import recordar_solicitud
+
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+    fijar_limite(db, gerente.id, por_pago=Decimal("10.00"), mensual=Decimal("500.00"))
+
+    hoy = date(2026, 10, 20)
+    manana = date(2026, 10, 21)
+
+    # 1. Deuda que vence mañana: recordatorio no urgente
+    d_manana = nueva_deuda(db, gerente, monto="50.00", fecha_vencimiento=manana)
+    res1 = iniciar_pago(db, asistente, d_manana.id, origen=ORIGEN_PRUEBA)
+    assert res1.solicitud is not None
+
+    sol1 = recordar_solicitud(db, res1.solicitud.id, hoy=hoy)
+    assert sol1.recordatorios_enviados == 1
+
+    notif_manana = db.scalar(
+        select(Notificacion)
+        .where(Notificacion.deuda_id == d_manana.id, Notificacion.usuario_id == gerente.id)
+        .order_by(Notificacion.id.desc())
+    )
+    assert notif_manana is not None
+    assert notif_manana.urgente is False
+
+    # 2. Deuda que vence hoy: recordatorio urgente
+    d_hoy = nueva_deuda(db, gerente, monto="60.00", fecha_vencimiento=hoy)
+    res2 = iniciar_pago(db, asistente, d_hoy.id, origen=ORIGEN_PRUEBA)
+    assert res2.solicitud is not None
+
+    sol2 = recordar_solicitud(db, res2.solicitud.id, hoy=hoy)
+    assert sol2.recordatorios_enviados == 1
+
+    notif_hoy = db.scalar(
+        select(Notificacion)
+        .where(Notificacion.deuda_id == d_hoy.id, Notificacion.usuario_id == gerente.id)
+        .order_by(Notificacion.id.desc())
+    )
+    assert notif_hoy is not None
+    assert notif_hoy.urgente is True
+
+
+def test_ca10_listas_de_solicitudes_por_estado(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA10: Hay listas de solicitudes clasificadas en pendientes, aprobadas y rechazadas."""
+    from app.services.limites import resolver_solicitud, solicitudes_de_gerente
+
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+    fijar_limite(db, gerente.id, por_pago=Decimal("10.00"))
+
+    # Crear 3 solicitudes
+    d1 = nueva_deuda(db, gerente, monto="20.00")
+    d2 = nueva_deuda(db, gerente, monto="30.00")
+    d3 = nueva_deuda(db, gerente, monto="40.00")
+
+    s1 = iniciar_pago(db, asistente, d1.id, origen=ORIGEN_PRUEBA).solicitud
+    s2 = iniciar_pago(db, asistente, d2.id, origen=ORIGEN_PRUEBA).solicitud
+    s3 = iniciar_pago(db, asistente, d3.id, origen=ORIGEN_PRUEBA).solicitud
+    assert s1 and s2 and s3
+
+    # Dejar s1 en pendiente, aprobar s2, rechazar s3
+    resolver_solicitud(db, gerente, s2.id, "aprobada")
+    resolver_solicitud(db, gerente, s3.id, "rechazada")
+
+    pendientes = solicitudes_de_gerente(db, gerente.id, estado="pendiente")
+    aprobadas = solicitudes_de_gerente(db, gerente.id, estado="aprobada")
+    rechazadas = solicitudes_de_gerente(db, gerente.id, estado="rechazada")
+    todas = solicitudes_de_gerente(db, gerente.id)
+
+    assert [s.id for s in pendientes] == [s1.id]
+    assert [s.id for s in aprobadas] == [s2.id]
+    assert [s.id for s in rechazadas] == [s3.id]
+    assert len(todas) == 3
+
+
+def test_ca11_limite_mensual_se_reinicia_el_dia_uno(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA11: El límite mensual se reinicia el día 1; consumos de meses previos no restan."""
+    from tests.conftest import nuevo_comprobante
+
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+
+    # Deuda pagada en septiembre con comprobante validado subido en septiembre
+    d_sep = nueva_deuda(db, gerente, monto="300.00", estado="pagada")
+    nuevo_comprobante(
+        db,
+        d_sep,
+        asistente,
+        "300.00",
+        creado_en=datetime(2026, 9, 25, 12, 0, 0, tzinfo=UTC),
+    )
+
+    # En septiembre el consumo era 300.00
+    fecha_sep = datetime(2026, 9, 30, 15, 0, 0, tzinfo=UTC)
+    assert consumo_mes_pen(db, gerente.id, fecha_sep) == Decimal("300.00")
+
+    # Al llegar el 1 de octubre, el consumo del mes se reinicia a 0.00
+    fecha_oct = datetime(2026, 10, 1, 8, 0, 0, tzinfo=UTC)
+    assert consumo_mes_pen(db, gerente.id, fecha_oct) == Decimal("0.00")
+
+
+def test_ca12_cambiar_limite_no_afecta_solicitudes_ya_enviadas(
+    db: Session,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """CA12: Modificar los límites no altera los montos ni estados de solicitudes ya emitidas."""
+    equipo = dos_gerentes.uno
+    gerente = equipo.gerente
+    asistente = equipo.asistente
+
+    fijar_limite(db, gerente.id, por_pago=Decimal("50.00"), mensual=Decimal("500.00"))
+    deuda = nueva_deuda(db, gerente, monto="120.00")
+
+    res = iniciar_pago(db, asistente, deuda.id, origen=ORIGEN_PRUEBA)
+    assert res.solicitud is not None
+    sol_id = res.solicitud.id
+
+    # El gerente incrementa sus límites a un valor superior a la deuda
+    fijar_limite(db, gerente.id, por_pago=Decimal("200.00"), mensual=Decimal("1500.00"))
+    db.commit()
+
+    # La solicitud previa conserva su monto original y su estado pendiente intactos
+    db.refresh(res.solicitud)
+    assert res.solicitud.id == sol_id
+    assert res.solicitud.monto == Decimal("120.00")
+    assert res.solicitud.estado == "pendiente"
