@@ -146,7 +146,7 @@ def test_restablecer_contrasena_exitoso(
 def test_restablecer_con_token_inexistente_responde_400(cliente: TestClient) -> None:
     r = cliente.post(
         RESTABLECER,
-        json={"token": "token-falso-inexistente", "nueva_contrasena": "NuevaClave123"},
+        json={"token": "token-falso-inexistente", "nueva_contrasena": "NuevaClave123!"},
     )
     assert r.status_code == 400
     assert r.json()["code"] == "TOKEN_INVALIDO"
@@ -170,7 +170,7 @@ def test_restablecer_con_token_ya_usado_responde_400(
 
     r = cliente.post(
         RESTABLECER,
-        json={"token": token_crudo, "nueva_contrasena": "NuevaClave123"},
+        json={"token": token_crudo, "nueva_contrasena": "NuevaClave123!"},
     )
     assert r.status_code == 400
     assert r.json()["code"] == "TOKEN_INVALIDO"
@@ -193,7 +193,7 @@ def test_restablecer_con_token_vencido_responde_400(
 
     r = cliente.post(
         RESTABLECER,
-        json={"token": token_crudo, "nueva_contrasena": "NuevaClave123"},
+        json={"token": token_crudo, "nueva_contrasena": "NuevaClave123!"},
     )
     assert r.status_code == 400
     assert r.json()["code"] == "TOKEN_INVALIDO"

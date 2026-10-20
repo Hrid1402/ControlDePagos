@@ -6,6 +6,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.core.reglas import ErrorReglaContrasena
+
 logger = logging.getLogger(__name__)
 
 CODIGOS_HTTP = {
@@ -69,6 +71,9 @@ async def manejar_validacion(_: Request, exc: Exception) -> JSONResponse:
     error = exc.errors()[0]
     tipo = error.get("type", "")
     mensaje = MENSAJES_VALIDACION.get(tipo, "El valor no es válido.")
+    causa = error.get("ctx", {}).get("error")
+    if isinstance(causa, ErrorReglaContrasena):
+        mensaje = str(causa)
     if tipo == "json_invalid":
         # En un JSON mal formado la ubicación es la posición del carácter, no un campo.
         return respuesta(422, mensaje, "VALIDACION")
