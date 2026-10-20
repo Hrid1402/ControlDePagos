@@ -85,9 +85,14 @@ def categoria_propia(db: Session, categoria_id: uuid.UUID, gerente_id: uuid.UUID
 
 
 def servicio_propio(
-    db: Session, servicio_id: uuid.UUID, gerente_id: uuid.UUID, bloquear: bool = False
+    db: Session,
+    servicio_id: uuid.UUID,
+    gerente_id: uuid.UUID,
+    bloquear: bool = False,
+    campo: str | None = None,
 ) -> Servicio:
-    """Servicio del gerente, de baja o no. Uno ajeno o eliminado responde el mismo 404."""
+    """Servicio del gerente, de baja o no. Uno ajeno o eliminado responde el mismo 404. campo
+    nombra el dato del cuerpo cuando el id no viene en la ruta."""
     consulta = select(Servicio).where(
         Servicio.id == servicio_id,
         Servicio.gerente_id == gerente_id,
@@ -97,17 +102,21 @@ def servicio_propio(
         consulta = consulta.with_for_update().execution_options(populate_existing=True)
     servicio = db.scalar(consulta)
     if servicio is None:
-        raise no_encontrado()
+        raise no_encontrado(campo)
     return servicio
 
 
 def servicio_activo_propio(
-    db: Session, servicio_id: uuid.UUID, gerente_id: uuid.UUID, bloquear: bool = False
+    db: Session,
+    servicio_id: uuid.UUID,
+    gerente_id: uuid.UUID,
+    bloquear: bool = False,
+    campo: str | None = None,
 ) -> Servicio:
     """Servicio que admite cambios y deudas nuevas: uno dado de baja responde 409."""
-    servicio = servicio_propio(db, servicio_id, gerente_id, bloquear)
+    servicio = servicio_propio(db, servicio_id, gerente_id, bloquear, campo)
     if servicio.estado == "baja":
-        raise ErrorApi(409, "SERVICIO_DE_BAJA", "El servicio está dado de baja.")
+        raise ErrorApi(409, "SERVICIO_DE_BAJA", "El servicio está dado de baja.", campo)
     return servicio
 
 
