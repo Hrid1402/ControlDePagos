@@ -27,5 +27,11 @@ class Settings(BaseSettings):
     s3_access_key: str
     s3_secret_key: str
 
+    # Responsable que informa la política de privacidad (app/core/politica.py). Cada instalación
+    # debe configurar su domicilio y su correo de contacto antes de producción.
+    politica_responsable: str = "Deconsta"
+    politica_domicilio: str | None = None
+    politica_correo: str | None = None
+
 
 settings = Settings()  # type: ignore[call-arg]

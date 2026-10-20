@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
 import { controlSesionKey } from '@/services/controlSesion'
@@ -7,6 +7,8 @@ import { useSesionStore } from '@/stores/sesion'
 import { INICIO_POR_ROL } from '@/router/guard'
 import PestanasEspacio from '@/components/espacio/PestanasEspacio.vue'
 import MenuCuenta from '@/components/espacio/MenuCuenta.vue'
+import ModalPolitica from '@/components/cuenta/ModalPolitica.vue'
+import { obtenerPerfil } from '@/api/acceso'
 
 // El espacio es la hoja del acceso llevada al trabajo diario: la mesa verde enmarca, las
 // pestañas de índice salen del borde de la hoja y la cuenta queda siempre a mano (RG08).
@@ -16,6 +18,18 @@ const confirmacion = useConfirm()
 const router = useRouter()
 const rol = computed(() => sesion.rol || 'gerente')
 const inicio = computed(() => INICIO_POR_ROL[rol.value])
+// H02 CA10: falta aceptar la política si la versión aceptada no es la vigente. Si el perfil no
+// carga, no se interrumpe el trabajo: se vuelve a comprobar al entrar de nuevo al espacio.
+const politicaPendiente = ref(false)
+onMounted(async () => {
+  try {
+    const perfil = await obtenerPerfil()
+    politicaPendiente.value =
+      !!perfil.politica_vigente && perfil.politica_version !== perfil.politica_vigente
+  } catch {
+    politicaPendiente.value = false
+  }
+})
 function cerrar() {
   const salir = () => {
     sesion.cerrar()
@@ -52,6 +66,7 @@ function cerrar() {
     </header>
     <PestanasEspacio :rol="rol" />
     <main id="contenido" class="hoja" tabindex="-1"><RouterView /></main>
+    <ModalPolitica v-if="politicaPendiente" @aceptada="politicaPendiente = false" @salir="cerrar" />
   </div>
 </template>
 
