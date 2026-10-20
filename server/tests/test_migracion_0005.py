@@ -102,7 +102,7 @@ def insertar_deuda_sin_monto(motor: Engine, estado: str = "esperando_recibo") ->
 
 def test_ida_y_vuelta_de_la_migracion(base_temporal: Engine) -> None:
     config = configuracion()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0005")
     assert version_de(base_temporal) == "0005"
     assert monto_admite_nulo(base_temporal)
 
@@ -112,14 +112,14 @@ def test_ida_y_vuelta_de_la_migracion(base_temporal: Engine) -> None:
     with pytest.raises(IntegrityError, match="monto"):
         insertar_deuda_sin_monto(base_temporal)
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "0005")
     assert monto_admite_nulo(base_temporal)
     insertar_deuda_sin_monto(base_temporal)
 
 
 def test_el_downgrade_con_deudas_sin_monto_falla_sin_tocar_datos(base_temporal: Engine) -> None:
     config = configuracion()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0005")
     deuda_id = insertar_deuda_sin_monto(base_temporal)
 
     with pytest.raises(DBAPIError, match="No se puede deshacer la migración 0005"):
@@ -137,7 +137,7 @@ def test_el_downgrade_funciona_si_las_deudas_sin_monto_se_resuelven(
     base_temporal: Engine,
 ) -> None:
     config = configuracion()
-    command.upgrade(config, "head")
+    command.upgrade(config, "0005")
     deuda_id = insertar_deuda_sin_monto(base_temporal, estado="anulada")
     with pytest.raises(DBAPIError, match="No se puede deshacer"):
         command.downgrade(config, "0004")
