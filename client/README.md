@@ -1,54 +1,27 @@
-# client
+# Deconsta · Frontend
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3, TypeScript y Vite. La portada temporal utiliza la identidad Vínculo: verde #075A50, Literata y Manrope, símbolo enlazado y aviso de próxima disponibilidad.
 
-## Recommended IDE Setup
+## Desarrollo
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+Desde la raíz del repositorio:
 
 ```sh
 pnpm install
+pnpm --filter client dev
+pnpm --filter client build
+pnpm lint:client
+pnpm test:client
 ```
 
-### Compile and Hot-Reload for Development
+## Marca y metadata
 
-```sh
-pnpm dev
-```
+Los recursos de producción están en `public/brand/deconsta/`: logos SVG, favicon SVG/ICO, iconos de aplicación, tarjeta social 1200 × 630, fuentes locales WOFF2 y licencias SIL OFL. El favicon del template se eliminó. Los originales del kit de diseño permanecen fuera del repositorio.
 
-### Type-Check, Compile and Minify for Production
+`index.html` centraliza título, descripción, idioma es-PE, colores de tema e iconos. `vite.config.ts` genera las etiquetas que dependen del dominio durante desarrollo y compilación.
 
-```sh
-pnpm build
-```
+Copiar `.env.example` a `.env.local` y definir `VITE_SITE_URL` con la URL pública real antes de compilar para publicar. También puede definirse en el entorno de despliegue. Se espera una URL raíz HTTP(S), sin subdirectorio, credenciales, consulta ni fragmento. No se ha fijado un dominio para esta portada.
 
-### Run Unit Tests with [Vitest](https://vitest.dev/)
+Con esa variable se generan canonical, og:url e imagen social absoluta para Open Graph y Twitter. Sin ella se omiten estas etiquetas dependientes del dominio. La portada incluye `noindex, nofollow` mientras está en preparación; revisar la indexación al lanzar el producto. No contiene formulario de registro ni anuncia una fecha de lanzamiento.
 
-```sh
-pnpm test:unit
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-pnpm lint
-```
+La aplicación y sus recursos esperan alojamiento en la raíz del dominio. La tarjeta social debe comprobarse en la URL real después del despliegue. El manifest define identidad e iconos, sin implementar funcionamiento offline.
