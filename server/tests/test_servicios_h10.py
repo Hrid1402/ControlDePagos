@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.models import Deuda, Empresa, Servicio
+from app.services.pagos import ResultadoInicio, iniciar_pago
 from tests.conftest import DosGerentes, nueva_categoria
 from tests.test_api_servicios import (
     ENEL,
@@ -126,3 +127,44 @@ def test_ca04_a_ca06_lista_y_detalle_muestran_lo_registrado_y_se_puede_vaciar(
         headers=cabecera(gerente),
     ).json()
     assert (vaciado["titular"], vaciado["alias"], vaciado["notas"]) == (None, None, None)
+
+
+def test_ca07_la_advertencia_cuenta_solo_las_deudas_sin_pagar_ni_anular(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    categoria = nueva_categoria(db, gerente)
+    servicio = creado(cliente, gerente, datos(categoria, codigo_suministro="VIEJO-1"))
+    deudas = [
+        deuda(db, servicio, gerente.id, mes, estado)
+        for mes, estado in enumerate(("pendiente", "esperando_recibo", "pagada", "anulada"), 6)
+    ]
+
+    detalle = cliente.get(f"{RUTA}/{servicio['id']}", headers=cabecera(gerente)).json()
+    editado = cliente.put(
+        f"{RUTA}/{servicio['id']}",
+        json=datos(categoria, codigo_suministro="NUEVO-1"),
+        headers=cabecera(gerente),
+    ).json()
+
+    assert detalle["deudas_pendientes"] == 2
+    assert editado["advertencias"] == {"codigo_cambiado": True, "deudas_pendientes": 2}
+    for d in deudas:
+        db.refresh(d)
+    assert {d.servicio_id for d in deudas} == {uuid.UUID(servicio["id"])}
+    assert [d.estado for d in deudas] == ["pendiente", "esperando_recibo", "pagada", "anulada"]
+
+
+def test_ca08_las_deudas_pendientes_de_un_servicio_de_baja_se_siguen_pagando(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    servicio = creado(cliente, equipo.gerente, datos(nueva_categoria(db, equipo.gerente)))
+    pendiente = deuda(db, servicio, equipo.gerente.id, 10, "pendiente")
+
+    baja = cliente.post(f"{RUTA}/{servicio['id']}/baja", headers=cabecera(equipo.gerente))
+    inicio = iniciar_pago(db, equipo.asistente, pendiente.id, origen=ORIGEN, ahora=AHORA)
+
+    assert (baja.status_code, baja.json()["deudas_pendientes"]) == (200, 1)
+    assert inicio.resultado == ResultadoInicio.INICIADO
+    assert pendiente.estado == "en_proceso"
