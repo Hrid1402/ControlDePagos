@@ -43,6 +43,7 @@ class Accion(StrEnum):
     APROBACION_SOLICITADA = "aprobacion_solicitada"
     APROBACION_APROBADA = "aprobacion_aprobada"
     APROBACION_RECHAZADA = "aprobacion_rechazada"
+    LIMITES_ACTUALIZADOS = "limites_actualizados"
     PERFIL_ACTUALIZADO = "perfil_actualizado"
     POLITICA_ACEPTADA = "politica_aceptada"
     DEUDA_FIJADA = "deuda_fijada"

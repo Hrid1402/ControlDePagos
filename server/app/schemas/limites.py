@@ -7,21 +7,35 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConfigurarLimiteEntrada(BaseModel):
-    """Importes opcionales para fijar topes de pago (CA02 y CA03)."""
+    """Límites en soles con hasta 2 decimales; null es sin límite (CA02 y CA03). Que el límite
+    por pago no supere al mensual lo valida fijar_limite, que marca el campo por_pago: un
+    validador entre campos aquí respondería sin campo."""
 
-    por_pago: Decimal | None = Field(default=None, gt=0, decimal_places=2)
-    mensual: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    por_pago: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    mensual: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
 
-    @model_validator(mode="after")
-    def validar_por_pago_no_supera_mensual(self) -> "ConfigurarLimiteEntrada":
-        if self.por_pago is not None and self.mensual is not None:
-            if self.por_pago > self.mensual:
-                raise ValueError("El límite por pago no puede ser mayor que el mensual.")
-        return self
+
+class ConsumoMesSalida(BaseModel):
+    """Consumo PEN del mes en Lima: abonos validados de la asistente y reservas en proceso."""
+
+    validado: Decimal
+    reservado: Decimal
+    total: Decimal
+
+
+class LimitesConsumoSalida(BaseModel):
+    """Límites del gerente con el consumo del mes frente a ellos (CA04). Sin configurar, los dos
+    límites son null y actualizado_en también."""
+
+    por_pago: Decimal | None
+    mensual: Decimal | None
+    actualizado_en: datetime | None
+    mes: str
+    consumo: ConsumoMesSalida
 
 
 class LimiteSalida(BaseModel):
