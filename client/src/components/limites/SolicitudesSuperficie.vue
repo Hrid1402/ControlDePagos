@@ -20,6 +20,9 @@ const props = withDefaults(
     estadoPantalla?: 'lista' | 'cargando' | 'error'
     /** Solicitud con una respuesta en curso: sus botones esperan. */
     ocupada?: string | null
+    /** Hay más solicitudes de este estado que las mostradas. */
+    hayMas?: boolean
+    cargandoMas?: boolean
   }>(),
   {
     solicitudes: () => [],
@@ -27,6 +30,8 @@ const props = withDefaults(
     pendientes: 0,
     estadoPantalla: 'lista',
     ocupada: null,
+    hayMas: false,
+    cargandoMas: false,
   },
 )
 const emit = defineEmits<{
@@ -34,6 +39,7 @@ const emit = defineEmits<{
   aprobar: [id: string]
   rechazar: [id: string, motivo: string | null]
   reintentar: []
+  mas: []
 }>()
 
 const rechazando = ref<string | null>(null)
@@ -154,6 +160,9 @@ function confirmarRechazo(id: string) {
         </div>
       </li>
     </ul>
+    <div v-if="estadoPantalla === 'lista' && visibles.length && hayMas" class="mas">
+      <Button label="Mostrar más" outlined :loading="cargandoMas" @click="emit('mas')" />
+    </div>
   </section>
 </template>
 
@@ -286,6 +295,9 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.mas {
+  margin-top: 16px;
 }
 .vacio {
   margin: 0;

@@ -65,6 +65,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Límites',
       descripcion: 'Hasta cuánto puede pagar tu asistente sin pedirte aprobación.',
       principal: false,
+      pagina: () => import('@/pages/LimitesPage.vue'),
     },
     {
       clave: 'historial',
