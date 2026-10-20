@@ -91,3 +91,25 @@ class ContrasenaRestablecidaSalida(BaseModel):
     username: str
     contrasena: str
     contrasena_inicial: bool
+
+
+class AsistenteListaSalida(AsistenteResumen):
+    """Fila de la lista de asistentes (CA01): nombre, usuario, estado y último ingreso."""
+
+    ultimo_ingreso: datetime | None
+    creado_en: datetime
+
+
+class EventoActivacion(BaseModel):
+    """Un cambio de estado de la cuenta (CA17). realizada_por es el nombre de quien lo hizo,
+    conservado aunque esa cuenta se haya eliminado."""
+
+    accion: str
+    realizada_por: str
+    creado_en: datetime
+
+
+class AsistenteDetalleSalida(AsistenteListaSalida):
+    """Detalle de una cuenta con su historial de activaciones, del más reciente al más antiguo."""
+
+    historial: list[EventoActivacion]
