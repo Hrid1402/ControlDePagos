@@ -2,16 +2,20 @@
 
 Implementa la creación por gerente o asistente (CA04), la edición y eliminación exclusivas
 del gerente (CA04), y la regla de mover servicios antes de eliminar una categoría (CA05).
+
+El tipo de la categoría define qué campos pide la deuda (CA03): mientras sus servicios tengan
+deudas o recurrencias, no se cambia su tipo ni se mueven a una categoría de otro tipo. Las
+precargadas no se eliminan (CA01).
 """
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
-from app.models import Categoria, Servicio, Usuario
+from app.models import Categoria, Deuda, Recurrencia, Servicio, Usuario
 from app.schemas.categorias import (
     ActualizarCategoriaEntrada,
     CategoriaSalida,
@@ -19,6 +23,32 @@ from app.schemas.categorias import (
     MensajeEliminacionCategoria,
 )
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
+
+
+def deudas_por_categoria(db: Session, gerente_id: uuid.UUID) -> dict[uuid.UUID, int]:
+    """Deudas vigentes (no anuladas) de cada categoría, a través de sus servicios (CA06)."""
+    filas = db.execute(
+        select(Servicio.categoria_id, func.count(Deuda.id))
+        .join(Deuda, Deuda.servicio_id == Servicio.id)
+        .where(Servicio.gerente_id == gerente_id, Deuda.estado != "anulada")
+        .group_by(Servicio.categoria_id)
+    ).all()
+    return {categoria_id: cantidad for categoria_id, cantidad in filas}
+
+
+def tipo_en_uso(db: Session, categoria_id: uuid.UUID) -> bool:
+    """Si algún servicio de la categoría tiene deudas o recurrencias, que dependen de su tipo."""
+    servicios = select(Servicio.id).where(Servicio.categoria_id == categoria_id)
+    return bool(
+        db.scalar(
+            select(
+                or_(
+                    exists().where(Deuda.servicio_id.in_(servicios)),
+                    exists().where(Recurrencia.servicio_id.in_(servicios)),
+                )
+            )
+        )
+    )
 
 
 def listar_categorias(db: Session, gerente_id: uuid.UUID) -> list[CategoriaSalida]:
@@ -46,10 +76,12 @@ def listar_categorias(db: Session, gerente_id: uuid.UUID) -> list[CategoriaSalid
         .order_by(Categoria.precargada.desc(), Categoria.nombre.asc())
     ).all()
 
+    deudas = deudas_por_categoria(db, gerente_id)
     resultado: list[CategoriaSalida] = []
     for categoria, cantidad in filas:
         salida = CategoriaSalida.model_validate(categoria)
         salida.cantidad_servicios = cantidad
+        salida.cantidad_deudas = deudas.get(categoria.id, 0)
         resultado.append(salida)
     return resultado
 
@@ -74,6 +106,7 @@ def obtener_categoria(
     )
     salida = CategoriaSalida.model_validate(categoria)
     salida.cantidad_servicios = cantidad
+    salida.cantidad_deudas = deudas_por_categoria(db, gerente_id).get(categoria.id, 0)
     return salida
 
 
@@ -164,6 +197,15 @@ def actualizar_categoria(
                 "nombre",
             )
 
+    if datos.tipo is not None and datos.tipo != categoria.tipo and tipo_en_uso(db, categoria.id):
+        raise ErrorApi(
+            409,
+            "TIPO_EN_USO",
+            "No puedes cambiar el tipo: sus servicios ya tienen deudas o recurrencias que "
+            "dependen de él. Crea otra categoría con el tipo nuevo.",
+            "tipo",
+        )
+
     antes = {
         "nombre": categoria.nombre,
         "color": categoria.color,
@@ -210,14 +252,16 @@ def mover_servicios(
     origen_id: uuid.UUID,
     destino_id: uuid.UUID,
     origen: Origen,
+    campo: str = "destino_id",
 ) -> int:
-    """Mueve todos los servicios de una categoría a otra (CA05)."""
+    """Mueve todos los servicios de una categoría a otra (CA05). A una de otro tipo solo si
+    ninguno tiene deudas ni recurrencias: sus campos dependen del tipo."""
     if origen_id == destino_id:
         raise ErrorApi(
             400,
             "MISMA_CATEGORIA",
             "La categoría de destino no puede ser la misma que la de origen.",
-            "destino_id",
+            campo,
         )
 
     cat_origen = db.get(Categoria, origen_id)
@@ -227,6 +271,14 @@ def mover_servicios(
     cat_destino = db.get(Categoria, destino_id)
     if cat_destino is None or cat_destino.gerente_id != gerente_id:
         raise ErrorApi(404, "NO_ENCONTRADO", "No se encontró la categoría de destino.")
+
+    if cat_destino.tipo != cat_origen.tipo and tipo_en_uso(db, origen_id):
+        raise ErrorApi(
+            409,
+            "TIPO_INCOMPATIBLE",
+            "Sus servicios tienen deudas o recurrencias: muévelos a una categoría del mismo tipo.",
+            campo,
+        )
 
     # Mover tanto activos como eliminados para no dejar llaves foráneas bloqueadas
     servicios = db.scalars(
@@ -272,6 +324,10 @@ def eliminar_categoria(
     categoria = db.get(Categoria, categoria_id)
     if categoria is None or categoria.gerente_id != gerente_id:
         raise ErrorApi(404, "NO_ENCONTRADO", "No se encontró la categoría solicitada.")
+    if categoria.precargada:
+        raise ErrorApi(
+            409, "CATEGORIA_PRECARGADA", "Las categorías precargadas no se pueden eliminar."
+        )
 
     conteo_servicios = (
         db.scalar(
@@ -293,7 +349,9 @@ def eliminar_categoria(
                 "muévelos a otra categoría antes de eliminarla.",
                 "mover_a",
             )
-        servicios_movidos = mover_servicios(db, usuario, gerente_id, categoria_id, mover_a, origen)
+        servicios_movidos = mover_servicios(
+            db, usuario, gerente_id, categoria_id, mover_a, origen, campo="mover_a"
+        )
 
     nombre_categoria = categoria.nombre
     tipo_categoria = categoria.tipo

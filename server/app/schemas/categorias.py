@@ -54,6 +54,7 @@ class CategoriaSalida(BaseModel):
     tipo: str
     precargada: bool
     cantidad_servicios: int = 0
+    cantidad_deudas: int = 0
     creado_por: uuid.UUID | None = None
     creado_en: datetime
     actualizado_en: datetime
