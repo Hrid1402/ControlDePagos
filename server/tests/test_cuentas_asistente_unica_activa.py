@@ -149,3 +149,117 @@ def test_ca02_asistente_activa_se_destaca_primero_en_la_lista(
     assert items[1]["estado"] == "inactiva"
     assert items[2]["id"] == str(mas_antigua_inactiva.id)
     assert items[2]["estado"] == "inactiva"
+
+
+def test_ca02_dos_activaciones_simultaneas_nunca_dejan_dos_asistentes_activas() -> None:
+    """CA02: Dos solicitudes simultáneas de activación serializan y jamás dejan dos
+    asistentes activas para el mismo gerente.
+    """
+    import concurrent.futures
+
+    from sqlalchemy import select, text
+
+    from app.core.database import SessionLocal
+    from app.core.dependencias import Origen
+    from app.services.asistentes import activar_asistente
+
+    origen = Origen(dispositivo="pytest_concurrencia", ip=None)
+    marca = uuid.uuid4().hex[:8]
+
+    # Setup: 1 gerente y 2 asistentes inactivas
+    with SessionLocal() as setup_db:
+        gerente = Usuario(
+            rol="gerente",
+            username=f"g_conc_{marca}",
+            password_hash="hash",
+            nombres="Gerente",
+            apellidos="Concurrente",
+        )
+        setup_db.add(gerente)
+        setup_db.commit()
+        setup_db.refresh(gerente)
+        gerente_id = gerente.id
+
+        asistente1 = Usuario(
+            rol="asistente",
+            gerente_id=gerente_id,
+            username=f"a1_{marca}",
+            password_hash="hash",
+            nombres="Asistente Uno",
+            apellidos="Pérez",
+            estado="inactiva",
+        )
+        asistente2 = Usuario(
+            rol="asistente",
+            gerente_id=gerente_id,
+            username=f"a2_{marca}",
+            password_hash="hash",
+            nombres="Asistente Dos",
+            apellidos="López",
+            estado="inactiva",
+        )
+        setup_db.add_all([asistente1, asistente2])
+        setup_db.commit()
+        setup_db.refresh(asistente1)
+        setup_db.refresh(asistente2)
+        id_1, id_2 = asistente1.id, asistente2.id
+
+    try:
+
+        def activar_en_hilo(asistente_id: uuid.UUID) -> str:
+            with SessionLocal() as db_hilo:
+                g = db_hilo.get_one(Usuario, gerente_id)
+                resultado = activar_asistente(db_hilo, g, asistente_id, origen)
+                db_hilo.commit()
+                return resultado.activada.estado
+
+        # Lanzar 2 activaciones simultáneas para asistentes distintas del mismo gerente
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            fut1 = executor.submit(activar_en_hilo, id_1)
+            fut2 = executor.submit(activar_en_hilo, id_2)
+            res1 = fut1.result(timeout=15)
+            res2 = fut2.result(timeout=15)
+
+        assert res1 == "activa"
+        assert res2 == "activa"
+
+        # Verificar en una nueva sesión que en la base de datos exactamente 1 asistente está activa
+        with SessionLocal() as db_verif:
+            activas = db_verif.scalars(
+                select(Usuario).where(
+                    Usuario.gerente_id == gerente_id,
+                    Usuario.rol == "asistente",
+                    Usuario.estado == "activa",
+                    Usuario.eliminado_en.is_(None),
+                )
+            ).all()
+            assert len(activas) == 1
+            # La otra asistente debe haber quedado inactiva
+            inactivas = db_verif.scalars(
+                select(Usuario).where(
+                    Usuario.gerente_id == gerente_id,
+                    Usuario.rol == "asistente",
+                    Usuario.estado == "inactiva",
+                    Usuario.eliminado_en.is_(None),
+                )
+            ).all()
+            assert len(inactivas) == 1
+    finally:
+        with SessionLocal() as db_clean:
+            db_clean.execute(
+                text("DELETE FROM activacion_cuenta WHERE realizada_por = :gid"),
+                {"gid": gerente_id},
+            )
+            db_clean.execute(
+                text("DELETE FROM auditoria WHERE gerente_id = :gid"),
+                {"gid": gerente_id},
+            )
+            db_clean.execute(
+                text("DELETE FROM usuario WHERE gerente_id = :gid"),
+                {"gid": gerente_id},
+            )
+            db_clean.execute(
+                text("DELETE FROM usuario WHERE id = :gid"),
+                {"gid": gerente_id},
+            )
+            db_clean.commit()
