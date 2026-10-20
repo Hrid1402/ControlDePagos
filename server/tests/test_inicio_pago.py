@@ -22,6 +22,7 @@ from app.services.pagos import (
     AutorizacionOrden,
     InicioPago,
     ResultadoInicio,
+    acciones_de_pago,
     iniciar_pago,
 )
 from app.services.saldo import consumo_mes_pen
@@ -355,7 +356,8 @@ def test_estados_que_no_permiten_iniciar(
     db: Session, dos_gerentes: DosGerentes, estado: str
 ) -> None:
     equipo = dos_gerentes.uno
-    deuda = nueva_deuda(db, equipo.gerente, estado=estado)
+    monto = None if estado == "esperando_recibo" else "100.00"
+    deuda = nueva_deuda(db, equipo.gerente, monto=monto, estado=estado)
     error = error_de(lambda: iniciar(db, equipo.asistente, deuda))
     assert (error.status_code, error.code) == (409, "ESTADO_NO_PERMITIDO")
     assert deuda.estado == estado
@@ -393,3 +395,27 @@ def test_el_indice_impide_una_segunda_solicitud_pendiente(
 
     assert (error.status_code, error.code) == (409, "APROBACION_PENDIENTE")
     assert deuda.estado == "pendiente"
+
+
+@pytest.mark.parametrize("rol", ["gerente", "asistente"])
+def test_la_deuda_esperando_recibo_sin_monto_no_se_inicia_hasta_confirmar_el_importe(
+    db: Session, dos_gerentes: DosGerentes, rol: str
+) -> None:
+    equipo = dos_gerentes.uno
+    usuario = getattr(equipo, rol)
+    deuda = nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
+    consumo = consumo_mes_pen(db, equipo.gerente.id, AHORA)
+
+    error = error_de(lambda: iniciar(db, usuario, deuda))
+
+    assert (error.status_code, error.code) == (409, "ESTADO_NO_PERMITIDO")
+    assert "aún no tiene monto" in error.detail
+    assert (deuda.estado, deuda.pago_iniciado_por, deuda.monto) == ("esperando_recibo", None, None)
+    assert auditorias(db, deuda, "pago_iniciado") == []
+    assert consumo_mes_pen(db, equipo.gerente.id, AHORA) == consumo
+    assert acciones_de_pago(db, deuda, usuario).iniciar is False
+
+    deuda.monto = Decimal("120.00")
+    deuda.estado = "pendiente"
+    assert acciones_de_pago(db, deuda, usuario).iniciar is True
+    assert iniciar(db, usuario, deuda).saldo == Decimal("120.00")

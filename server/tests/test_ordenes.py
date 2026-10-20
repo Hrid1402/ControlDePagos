@@ -532,3 +532,17 @@ def test_salida_con_los_datos_de_la_pantalla_completa(
 )
 def test_leer_motivo(texto: str | None, esperado: tuple[MotivoNoPago | None, str | None]) -> None:
     assert leer_motivo(texto) == esperado
+
+
+def test_aceptar_una_orden_no_se_afecta_por_otra_deuda_esperando_recibo(
+    db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    sin_monto = nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
+    orden = orden_de(db, equipo, monto="100.00")
+
+    aceptada = aceptar_orden(db, equipo.asistente, orden.id, origen=ORIGEN, ahora=AHORA)
+
+    assert aceptada.inicio.resultado == ResultadoInicio.INICIADO
+    assert db.get_one(Deuda, orden.deuda_id).estado == "en_proceso"
+    assert (sin_monto.estado, sin_monto.monto) == ("esperando_recibo", None)

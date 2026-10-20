@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -441,3 +442,20 @@ def test_saldo_descuenta_solo_abonos_validados(db: Session, dos_gerentes: DosGer
     (fila,) = bandeja(db, equipo.gerente).filas
 
     assert fila.saldo == 70
+
+
+def test_la_deuda_esperando_recibo_sin_monto_queda_fuera_de_la_bandeja(
+    db: Session, dos_gerentes: DosGerentes
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    pendiente = nueva_deuda(db, gerente, monto="100.00")
+    nueva_deuda(db, gerente, monto=None, estado="esperando_recibo")
+    nueva_deuda(db, gerente, monto=None, estado="anulada")
+
+    for pestana in Pestana:
+        resultado = bandeja(db, gerente, pestana)
+        assert resultado.total == len(resultado.filas)
+    por_pagar = bandeja(db, gerente)
+    assert ids(por_pagar) == [pendiente.id]
+    assert contadores(por_pagar) == (1, 0, 0)
+    assert por_pagar.filas[0].saldo == Decimal("100.00")

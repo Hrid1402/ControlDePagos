@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.api.v1.pagos import deuda_salida
 from app.core.database import get_db
 from app.core.seguridad import crear_token
 from app.main import app
@@ -183,3 +184,31 @@ def test_cancelar_sin_intento_responde_409(
     deuda = nueva_deuda(db, equipo.gerente)
     r = cliente.post(cancelar_ruta(deuda.id), headers=cabecera(equipo.asistente))
     assert (r.status_code, r.json()["code"]) == (409, "SIN_INTENTO")
+
+
+@pytest.mark.parametrize("rol", ["gerente", "asistente"])
+def test_iniciar_una_deuda_esperando_recibo_responde_409(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes, rol: str
+) -> None:
+    equipo = dos_gerentes.uno
+    deuda = nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
+
+    r = cliente.post(iniciar_ruta(deuda.id), headers=cabecera(getattr(equipo, rol)))
+
+    assert r.status_code == 409
+    assert r.json() == {
+        "detail": "La deuda aún no tiene monto: espera el recibo del mes.",
+        "code": "ESTADO_NO_PERMITIDO",
+        "field": None,
+    }
+
+
+def test_el_estado_de_pago_de_una_deuda_sin_monto_expone_null_y_no_cero(
+    db: Session, dos_gerentes: DosGerentes
+) -> None:
+    deuda = nueva_deuda(db, dos_gerentes.uno.gerente, monto=None, estado="esperando_recibo")
+
+    salida = deuda_salida(db, deuda)
+
+    assert (salida.monto, salida.saldo) == (None, None)
+    assert salida.model_dump(mode="json")["saldo"] is None
