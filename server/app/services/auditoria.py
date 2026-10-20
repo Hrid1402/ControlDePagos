@@ -52,6 +52,8 @@ class Accion(StrEnum):
     USUARIO_CAMBIADO = "usuario_cambiado"
     CONTRASENA_CAMBIADA = "contrasena_cambiada"
     CATEGORIA_CREADA = "categoria_creada"
+    CATEGORIA_ACTUALIZADA = "categoria_actualizada"
+    CATEGORIA_ELIMINADA = "categoria_eliminada"
     SERVICIO_CREADO = "servicio_creado"
     SERVICIO_ACTUALIZADO = "servicio_actualizado"
     SERVICIO_DADO_DE_BAJA = "servicio_dado_de_baja"
