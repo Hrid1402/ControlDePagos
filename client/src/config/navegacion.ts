@@ -59,6 +59,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Categorías',
       descripcion: 'Agrupa tus servicios por tipo de gasto.',
       principal: false,
+      pagina: () => import('@/pages/CategoriasPage.vue'),
     },
     {
       clave: 'limites',
