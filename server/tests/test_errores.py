@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, field_validator
@@ -18,6 +19,17 @@ class Pago(BaseModel):
 @prueba.get("/error-api")
 def error_api() -> None:
     raise ErrorApi(409, "DUPLICADO", "Ya existe un servicio con ese código", "codigo_suministro")
+
+
+@prueba.get("/error-api-con-datos")
+def error_api_con_datos() -> None:
+    raise ErrorApi(
+        409,
+        "DUPLICADO",
+        "Ya existe una deuda de este servicio para ese periodo.",
+        "periodo",
+        datos={"deuda_existente": {"id": "d1", "monto": "10.50"}},
+    )
 
 
 @prueba.get("/validacion")
@@ -47,6 +59,29 @@ def test_error_de_negocio_con_su_status_y_campo() -> None:
         "code": "DUPLICADO",
         "field": "codigo_suministro",
     }
+
+
+def test_los_datos_opcionales_se_agregan_a_la_respuesta() -> None:
+    r = cliente.get("/error-api-con-datos")
+    assert r.status_code == 409
+    assert r.json() == {
+        "detail": "Ya existe una deuda de este servicio para ese periodo.",
+        "code": "DUPLICADO",
+        "field": "periodo",
+        "deuda_existente": {"id": "d1", "monto": "10.50"},
+    }
+
+
+def test_sin_datos_la_respuesta_no_tiene_claves_adicionales() -> None:
+    error = ErrorApi(409, "CONFLICTO", "Conflicto")
+    assert error.datos == {}
+    assert set(cliente.get("/error-api").json()) == {"detail", "code", "field"}
+
+
+@pytest.mark.parametrize("clave", ["detail", "code", "field"])
+def test_los_datos_no_reemplazan_las_claves_del_formato(clave: str) -> None:
+    with pytest.raises(ValueError, match=clave):
+        ErrorApi(409, "DUPLICADO", "Duplicado", datos={clave: "otro"})
 
 
 def test_campo_obligatorio_responde_422_con_el_campo() -> None:
