@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -31,17 +32,34 @@ MENSAJES_VALIDACION = {
 }
 
 UBICACIONES = {"body", "query", "path", "header", "cookie"}
+CLAVES_BASE = frozenset({"detail", "code", "field"})
 
 
 class ErrorApi(Exception):
-    """Error de negocio que sale como {detail, code, field} con su status HTTP."""
+    """Error de negocio que sale como {detail, code, field} con su status HTTP.
 
-    def __init__(self, status_code: int, code: str, detail: str, field: str | None = None) -> None:
+    datos agrega claves opcionales a la respuesta, por ejemplo la referencia al recurso que
+    provoca un DUPLICADO. Sus valores ya deben estar listos para JSON (los montos como texto).
+    Sin datos, la respuesta es exactamente {detail, code, field}.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+        field: str | None = None,
+        datos: Mapping[str, Any] | None = None,
+    ) -> None:
         super().__init__(detail)
+        repetidas = CLAVES_BASE.intersection(datos or {})
+        if repetidas:
+            raise ValueError(f"Los datos del error no pueden reemplazar {sorted(repetidas)}.")
         self.status_code = status_code
         self.code = code
         self.detail = detail
         self.field = field
+        self.datos = dict(datos or {})
 
 
 def respuesta(
@@ -50,10 +68,11 @@ def respuesta(
     code: str,
     field: str | None = None,
     headers: Mapping[str, str] | None = None,
+    datos: Mapping[str, Any] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content={"detail": detail, "code": code, "field": field},
+        content={"detail": detail, "code": code, "field": field, **(datos or {})},
         headers=headers,
     )
 
@@ -61,7 +80,7 @@ def respuesta(
 async def manejar_error_api(_: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, ErrorApi):
         raise exc
-    return respuesta(exc.status_code, exc.detail, exc.code, exc.field)
+    return respuesta(exc.status_code, exc.detail, exc.code, exc.field, datos=exc.datos)
 
 
 async def manejar_validacion(_: Request, exc: Exception) -> JSONResponse:
