@@ -4,7 +4,7 @@ Reutiliza las tablas limite y solicitud_aprobacion existentes en el esquema.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -53,3 +53,19 @@ class SolicitudAprobacionSalida(BaseModel):
     resuelta_en: datetime | None
     creado_en: datetime
     actualizado_en: datetime
+
+
+class SolicitudListaSalida(SolicitudAprobacionSalida):
+    """Solicitud con lo que la lista muestra junto a ella (CA10): servicio, vencimiento y los
+    nombres de quien la pidió y de quien la resolvió."""
+
+    servicio: str
+    fecha_vencimiento: date
+    asistente: str
+    resuelta_por_nombre: str | None
+
+
+class RechazarSolicitudEntrada(BaseModel):
+    """Motivo opcional del rechazo, que recibe la asistente (CA08)."""
+
+    motivo: str | None = Field(default=None, max_length=300)

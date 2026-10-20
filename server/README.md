@@ -120,6 +120,7 @@ misma configuración que la API (`DATABASE_URL`). No necesitan variables de ento
 | `app/workers/base.py` | Base de las tareas: reintentos, sesión propia y bloqueo |
 | `app/workers/encolar.py` | Encolar una tarea solo si la transacción se confirma |
 | `app/workers/latido.py` | Latido: job de ejemplo que comprueba que todo responde |
+| `app/workers/aprobaciones.py` | Recordatorios de solicitudes de aprobación pendientes (H05) |
 
 ### Arranque local
 
