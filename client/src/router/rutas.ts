@@ -18,6 +18,12 @@ export const rutas: RouteRecordRaw[] = [
           component: () => import('@/pages/LimitesRevisionPage.vue'),
           meta: { libre: true, titulo: 'Revisión de límites' },
         },
+        {
+          path: '/revision/servicios',
+          name: 'revision-servicios',
+          component: () => import('@/pages/ServiciosRevisionPage.vue'),
+          meta: { libre: true, titulo: 'Revisión de servicios' },
+        },
       ]
     : []),
   {
