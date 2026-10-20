@@ -5,8 +5,10 @@ la sesión se cierra sin confirmar y se pierden el contador, el bloqueo y el eve
 """
 
 import hashlib
+import logging
 import math
 import secrets
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
@@ -21,6 +23,8 @@ from app.core.seguridad import HASH_RELLENO, verificar_contrasena
 from app.models import TokenRestablecimiento, Usuario
 from app.services.auditoria import Accion, registrar_auditoria, registrar_login_desconocido
 from app.services.contrasenas import actualizar_contrasena, es_reutilizada
+
+logger = logging.getLogger(__name__)
 
 
 class Motivo(StrEnum):
@@ -125,41 +129,61 @@ def iniciar_sesion(db: Session, username: str, contrasena: str, origen: Origen) 
 
 
 MENSAJE_RECUPERACION_GENERICO = (
-    "Si el correo está registrado, enviamos las instrucciones para restablecer tu contraseña."
+    "Si el usuario existe y tiene un correo registrado, te enviamos un enlace para restablecer "
+    "la contraseña. Revisa tu bandeja de entrada y la carpeta de spam. Si no llega, la asistente "
+    "puede pedir al gerente que la restablezca."
 )
 
 
-def solicitar_recuperacion(db: Session, correo: str, origen: Origen) -> str:
-    """Genera un token de un solo uso para restablecer contraseña y lo envía por correo.
-    Siempre devuelve un mensaje genérico para evitar enumeración de cuentas."""
+@dataclass(frozen=True)
+class CorreoRecuperacion:
+    """Correo pendiente de envío. No se imprime: lleva la dirección y el token."""
+
+    destinatario: str = field(repr=False)
+    nombre: str = field(repr=False)
+    token: str = field(repr=False)
+
+
+def solicitar_recuperacion(db: Session, username: str) -> CorreoRecuperacion | None:
+    """Crea el token de un solo uso para el usuario y devuelve el correo a enviar. Sin usuario,
+    o si está inactivo, eliminado o sin correo, no crea nada, no audita y devuelve None. El
+    username escrito no se guarda en ningún registro: puede ser una cuenta ajena o una
+    contraseña escrita en el campo equivocado."""
     usuario = db.scalar(
-        select(Usuario).where(func.lower(Usuario.correo) == func.lower(correo)).limit(1)
+        select(Usuario).where(func.lower(Usuario.username) == func.lower(username)).limit(1)
     )
+    if (
+        usuario is None
+        or usuario.eliminado_en is not None
+        or usuario.estado != "activa"
+        or not usuario.correo
+    ):
+        return None
 
-    if usuario is not None and usuario.eliminado_en is None and usuario.estado == "activa":
-        token_crudo = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(token_crudo.encode()).hexdigest()
-        expira_en = datetime.now(UTC) + timedelta(hours=1)
-
-        registro = TokenRestablecimiento(
+    token_crudo = secrets.token_urlsafe(32)
+    db.add(
+        TokenRestablecimiento(
             usuario_id=usuario.id,
-            token_hash=token_hash,
-            expira_en=expira_en,
+            token_hash=hashlib.sha256(token_crudo.encode()).hexdigest(),
+            expira_en=datetime.now(UTC) + timedelta(hours=1),
         )
-        db.add(registro)
-        db.commit()
+    )
+    db.commit()
+    return CorreoRecuperacion(usuario.correo, usuario.nombres or usuario.username, token_crudo)
 
-        nombre = usuario.nombres or usuario.username
-        cuerpo = (
-            f"Hola {nombre},\n\n"
-            f"Recibimos una solicitud para restablecer tu contraseña.\n"
-            f"Tu código de restablecimiento es:\n\n{token_crudo}\n\n"
-            f"Este código es válido por 1 hora.\n"
-            f"Si no solicitaste este cambio, puedes ignorar este mensaje.\n"
-        )
-        enviar_correo(usuario.correo or correo, "Restablecimiento de contraseña", cuerpo)
 
-    return MENSAJE_RECUPERACION_GENERICO
+def enviar_recuperacion(correo: CorreoRecuperacion) -> None:
+    """Envía el correo de recuperación. Un fallo se registra sin usuario ni correo y no cambia
+    lo que ya respondió la solicitud."""
+    cuerpo = (
+        f"Hola {correo.nombre},\n\n"
+        f"Recibimos una solicitud para restablecer tu contraseña.\n"
+        f"Tu código de restablecimiento es:\n\n{correo.token}\n\n"
+        f"Este código es válido por 1 hora.\n"
+        f"Si no solicitaste este cambio, puedes ignorar este mensaje.\n"
+    )
+    if not enviar_correo(correo.destinatario, "Restablecimiento de contraseña", cuerpo):
+        logger.warning("No se envió el correo de recuperación de contraseña")
 
 
 def restablecer_contrasena(

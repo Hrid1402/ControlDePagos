@@ -25,11 +25,11 @@ def enviar_correo(destinatario: str, asunto: str, contenido_texto: str) -> bool:
             servidor.send_message(mensaje)
         return True
     except Exception as exc:
+        # Ni el destinatario ni el texto del error: pueden incluir la dirección.
         logger.warning(
-            "No se pudo enviar el correo a %s (host=%s, port=%s): %s",
-            destinatario,
+            "No se pudo enviar el correo (host=%s, port=%s): %s",
             settings.smtp_host,
             settings.smtp_port,
-            exc,
+            type(exc).__name__,
         )
         return False
