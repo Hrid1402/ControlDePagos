@@ -79,6 +79,22 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/asistentes/{asistente_id}/desactivar"): "MATRIZ",
     ("POST", "/api/v1/asistentes/{asistente_id}/restablecer-contrasena"): "MATRIZ",
     ("DELETE", "/api/v1/asistentes/{asistente_id}"): "MATRIZ",
+    # Categorías (TASK-28): probadas en test_categorias.py
+    ("GET", "/api/v1/categorias/{id}"): (
+        "asistente ajena y gerente ajeno: "
+        "test_categorias::test_obtener_categoria_detalle_y_404_si_no_existe_o_ajena"
+    ),
+    ("PUT", "/api/v1/categorias/{id}"): (
+        "asistente propia y gerente ajeno: "
+        "test_categorias::test_editar_categoria_solo_gerente_y_404_ajena"
+    ),
+    ("POST", "/api/v1/categorias/{id}/mover-servicios"): (
+        "asistente propia y gerente ajeno: test_categorias::test_mover_servicios_solo_gerente"
+    ),
+    ("DELETE", "/api/v1/categorias/{id}"): (
+        "asistente propia y gerente ajeno: "
+        "test_categorias::test_eliminar_categoria_solo_gerente_y_reglas"
+    ),
 }
 
 
