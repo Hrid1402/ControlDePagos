@@ -17,6 +17,10 @@ LARGO_MINIMO_CONTRASENA = 8
 BYTES_MAXIMOS_CONTRASENA = 72
 
 
+class ErrorReglaContrasena(ValueError):
+    """Motivo seguro de una regla de contraseña; nunca incluye el valor recibido."""
+
+
 def es_simbolo(caracter: str) -> bool:
     return not caracter.isalnum() and not caracter.isspace()
 
@@ -25,16 +29,20 @@ def validar_contrasena(contrasena: str) -> str:
     """Devuelve la contraseña si cumple las reglas; si no, ValueError con el motivo. El mensaje
     nunca incluye la contraseña."""
     if len(contrasena.encode()) > BYTES_MAXIMOS_CONTRASENA:
-        raise ValueError("La contraseña es demasiado larga.")
+        raise ErrorReglaContrasena("La contraseña es demasiado larga.")
     if len(contrasena) < LARGO_MINIMO_CONTRASENA:
-        raise ValueError(f"La contraseña debe tener al menos {LARGO_MINIMO_CONTRASENA} caracteres.")
+        raise ErrorReglaContrasena(
+            f"La contraseña debe tener al menos {LARGO_MINIMO_CONTRASENA} caracteres."
+        )
     if not (
         any(c.isupper() for c in contrasena)
         and any(c.islower() for c in contrasena)
         and any(c.isdigit() for c in contrasena)
         and any(es_simbolo(c) for c in contrasena)
     ):
-        raise ValueError("La contraseña debe tener mayúscula, minúscula, número y símbolo.")
+        raise ErrorReglaContrasena(
+            "La contraseña debe tener mayúscula, minúscula, número y símbolo."
+        )
     return contrasena
 
 

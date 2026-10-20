@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.seguridad import hashear_contrasena
-from app.models import Categoria, HistorialContrasena, Usuario
+from app.models import Categoria, Usuario
 from app.schemas.inicializacion import DatosGerente
 from app.services.auditoria import Accion, registrar_auditoria
 
@@ -206,8 +206,6 @@ def crear_gerente(
         return None
 
     gerente = db.get_one(Usuario, gerente_id)
-    # Como en la creación de asistentes (TASK-13), el hash inicial queda en el historial.
-    db.add(HistorialContrasena(usuario_id=gerente.id, password_hash=password_hash))
     registrar_auditoria(
         db,
         gerente,

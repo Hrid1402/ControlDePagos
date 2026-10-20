@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.errores import ErrorApi, registrar_manejadores
 from app.main import app
@@ -109,3 +109,29 @@ def test_metodo_no_permitido_responde_405() -> None:
     assert r.json()["code"] == "METODO_NO_PERMITIDO"
     assert r.json()["detail"] == "Método no permitido."
     assert "GET" in r.headers["allow"]
+
+
+class EntradaConErrorInterno(BaseModel):
+    valor: str
+
+    @field_validator("valor")
+    @classmethod
+    def validar(cls, valor: str) -> str:
+        raise ValueError(f"Detalle interno con el dato recibido: {valor}")
+
+
+@prueba.post("/validacion-interna")
+def validacion_interna(datos: EntradaConErrorInterno) -> None:
+    pass
+
+
+def test_solo_los_motivos_seguros_se_exponen_en_validacion() -> None:
+    r = cliente.post("/validacion-interna", json={"valor": "dato-confidencial"})
+    assert r.status_code == 422
+    assert r.json() == {
+        "detail": "El valor no es válido.",
+        "code": "VALIDACION",
+        "field": "valor",
+    }
+    assert "dato-confidencial" not in r.text
+    assert "Detalle interno" not in r.text

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.seguridad import generar_contrasena_segura, hashear_contrasena
-from app.models import HistorialContrasena, Usuario
+from app.models import Usuario
 from app.schemas.asistentes import CrearAsistenteEntrada, DisponibilidadUsernameSalida
 from app.services.auditoria import Accion, registrar_auditoria
 
@@ -145,10 +145,6 @@ def crear_asistente(
     )
     db.add(asistente)
     db.flush()
-
-    # Guardar hash inicial en historial
-    historial = HistorialContrasena(usuario_id=asistente.id, password_hash=asistente.password_hash)
-    db.add(historial)
 
     # Registrar auditoría de creación (sin incluir la contraseña)
     detalle_auditoria = {

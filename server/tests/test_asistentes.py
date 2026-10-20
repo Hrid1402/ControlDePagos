@@ -86,12 +86,11 @@ def test_ca08_credenciales_mostradas_una_sola_vez_y_login_exitoso(
     assert asistente.password_hash != contrasena_plana
     assert verificar_contrasena(contrasena_plana, asistente.password_hash)
 
-    # 2. Historial de contraseñas contiene el hash
+    # 2. La cuenta nueva todavía no tiene contraseñas anteriores
     historial = db.scalars(
         select(HistorialContrasena).where(HistorialContrasena.usuario_id == asistente.id)
     ).all()
-    assert len(historial) == 1
-    assert historial[0].password_hash == asistente.password_hash
+    assert historial == []
 
     # 3. La contraseña no figura en ningún detalle de auditoría
     eventos = db.scalars(select(Auditoria).where(Auditoria.entidad_id == asistente.id)).all()
