@@ -7,6 +7,7 @@ documento y correo únicos, e inmutabilidad del rol (CA09).
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import politica
@@ -16,6 +17,21 @@ from app.models import Usuario
 from app.schemas.usuarios import ActualizarPerfilEntrada, PerfilSalida
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
 from app.services.cuenta import cambios_restantes
+
+
+def documento_duplicado() -> ErrorApi:
+    return ErrorApi(
+        409,
+        "DOCUMENTO_DUPLICADO",
+        "Ya existe un usuario con este número de documento.",
+        "numero_documento",
+    )
+
+
+def correo_duplicado() -> ErrorApi:
+    return ErrorApi(
+        409, "CORREO_DUPLICADO", "Ya existe un usuario con este correo electrónico.", "correo"
+    )
 
 
 def perfil_de(db: Session, usuario: Usuario) -> PerfilSalida:
@@ -52,17 +68,12 @@ def actualizar_perfil(
     if datos.numero_documento and datos.numero_documento != usuario.numero_documento:
         existente_doc = db.scalar(
             select(Usuario).where(
-                Usuario.numero_documento == datos.numero_documento,
+                func.upper(Usuario.numero_documento) == datos.numero_documento,
                 Usuario.id != usuario.id,
             )
         )
         if existente_doc is not None:
-            raise ErrorApi(
-                409,
-                "DOCUMENTO_DUPLICADO",
-                "Ya existe un usuario con este número de documento.",
-                "numero_documento",
-            )
+            raise documento_duplicado()
 
     # Verificar si el correo ya está registrado por otro usuario
     if correo_limpio and correo_limpio.lower() != (usuario.correo or "").lower():
@@ -73,12 +84,7 @@ def actualizar_perfil(
             )
         )
         if existente_correo is not None:
-            raise ErrorApi(
-                409,
-                "CORREO_DUPLICADO",
-                "Ya existe un usuario con este correo electrónico.",
-                "correo",
-            )
+            raise correo_duplicado()
 
     anterior = {
         "nombres": usuario.nombres,
@@ -87,7 +93,6 @@ def actualizar_perfil(
         "correo": usuario.correo,
         "tipo_documento": usuario.tipo_documento,
         "numero_documento": usuario.numero_documento,
-        "politica_version": usuario.politica_version,
     }
 
     usuario.nombres = datos.nombres
@@ -99,9 +104,18 @@ def actualizar_perfil(
         usuario.tipo_documento = datos.tipo_documento
     if datos.numero_documento is not None:
         usuario.numero_documento = datos.numero_documento
-    if datos.politica_version is not None:
-        usuario.politica_version = datos.politica_version
-        usuario.politica_aceptada_en = datetime.now(UTC)
+
+    try:
+        db.flush()
+    except IntegrityError as error:
+        # Otra cuenta guardó el mismo documento o correo entre la consulta y el guardado.
+        db.rollback()
+        restriccion = str(error.orig)
+        if "uq_usuario_numero_documento" in restriccion:
+            raise documento_duplicado() from error
+        if "uq_usuario_correo" in restriccion:
+            raise correo_duplicado() from error
+        raise
 
     nuevo = {
         "nombres": usuario.nombres,
@@ -110,7 +124,6 @@ def actualizar_perfil(
         "correo": usuario.correo,
         "tipo_documento": usuario.tipo_documento,
         "numero_documento": usuario.numero_documento,
-        "politica_version": usuario.politica_version,
     }
 
     cambios = diferencias(anterior, nuevo)

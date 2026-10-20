@@ -28,7 +28,6 @@ class ActualizarPerfilEntrada(BaseModel):
     correo: str | None = None
     tipo_documento: Literal["dni", "ce", "pasaporte"] | None = None
     numero_documento: str | None = None
-    politica_version: str | None = None
 
     @field_validator("correo")
     @classmethod
@@ -65,6 +64,8 @@ class ActualizarPerfilEntrada(BaseModel):
                 "El carné de extranjería o pasaporte debe tener "
                 "entre 9 y 12 caracteres alfanuméricos."
             )
+        # CA04: pe1234567 y PE1234567 son el mismo documento; se guarda en mayúsculas.
+        self.numero_documento = (self.numero_documento or "").upper()
         return self
 
 
