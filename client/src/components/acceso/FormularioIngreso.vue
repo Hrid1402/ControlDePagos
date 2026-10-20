@@ -10,7 +10,7 @@ const props = withDefaults(
   { cargando: false, bloqueado: false, mostrarVacios: false },
 )
 const emit = defineEmits<{ enviar: [datos: CredencialesIngreso]; recuperar: [] }>()
-const { handleSubmit, setErrors } = useForm({
+const { handleSubmit, setErrors, setFieldValue } = useForm({
   initialValues: { username: '', contrasena: '' },
   validationSchema: toTypedSchema(
     z.object({
@@ -26,15 +26,29 @@ watch(
   },
   { immediate: true },
 )
+const enfocar = (nombre: string) =>
+  document.querySelector<HTMLInputElement>(`input[name="${nombre}"]`)?.focus()
 const enviar = handleSubmit(
   (datos) => {
     if (!props.cargando && !props.bloqueado) emit('enviar', datos)
   },
   ({ errors }) => {
-    const nombre = Object.keys(errors)[0]
-    if (nombre) document.querySelector<HTMLInputElement>(`input[name="${nombre}"]`)?.focus()
+    // El primer campo con error en el orden del formulario, no en el del objeto de errores.
+    const nombre = ['username', 'contrasena'].find((campo) => campo in errors)
+    if (nombre) enfocar(nombre)
   },
 )
+defineExpose({
+  marcarError(campo: 'username' | 'contrasena', mensaje: string) {
+    setErrors({ [campo]: mensaje })
+    enfocar(campo)
+  },
+  /** Tras credenciales incorrectas se conserva el usuario y se vuelve a pedir la contraseña. */
+  pedirContrasena() {
+    setFieldValue('contrasena', '', false)
+    enfocar('contrasena')
+  },
+})
 </script>
 <template>
   <section class="hoja-acceso" aria-labelledby="titulo-formulario">

@@ -13,7 +13,8 @@ export function resolverAcceso(
   if (destino.meta.libre) return true
   if (destino.meta.publica) return rol ? { name: INICIO_POR_ROL[rol] } : true
   if (!rol) return { name: 'login', query: { redirect: destino.fullPath } }
-  if (destino.meta.rol && destino.meta.rol !== rol) return { name: INICIO_POR_ROL[rol] }
+  // H01 CA11: entrar a una página de otro rol, incluso escribiendo la dirección, avisa que no hay acceso.
+  if (destino.meta.rol && destino.meta.rol !== rol) return { name: 'sin-permiso' }
   return true
 }
 export function retornoAutorizado(router: Router, ruta: unknown, rol: Rol): RouteLocationRaw {
