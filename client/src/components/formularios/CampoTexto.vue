@@ -9,7 +9,7 @@ const props = withDefaults(
     nombre: string
     etiqueta: string
     ayuda?: string
-    tipo?: 'text' | 'email' | 'password' | 'tel'
+    tipo?: 'text' | 'email' | 'password' | 'tel' | 'date' | 'month'
   }>(),
   { tipo: 'text' },
 )
