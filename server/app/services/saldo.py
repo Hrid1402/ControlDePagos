@@ -131,8 +131,11 @@ def rango_mes(ahora: datetime) -> tuple[datetime, datetime]:
     return inicio, inicio.replace(month=inicio.month + 1)
 
 
-def consumo_mes_pen(db: Session, gerente_id: uuid.UUID, ahora: datetime | None = None) -> Decimal:
-    """Consumo PEN del mes del gerente frente a su límite mensual: abonos más reservas."""
+def consumo_mes_desglose(
+    db: Session, gerente_id: uuid.UUID, ahora: datetime | None = None
+) -> tuple[Decimal, Decimal]:
+    """Consumo PEN del mes del gerente en sus dos partes: abonos validados y reservas en proceso.
+    La pantalla de límites los muestra por separado (H05 CA04)."""
     inicio, fin = rango_mes(ahora or ahora_lima())
     abonos = db.scalar(
         select(func.coalesce(func.sum(ComprobanteDeuda.monto_aplicado), 0))
@@ -158,7 +161,13 @@ def consumo_mes_pen(db: Session, gerente_id: uuid.UUID, ahora: datetime | None =
             Usuario.rol == "asistente",
         )
     )
-    return (abonos or Decimal(0)) + (reservas or Decimal(0))
+    return abonos or Decimal(0), reservas or Decimal(0)
+
+
+def consumo_mes_pen(db: Session, gerente_id: uuid.UUID, ahora: datetime | None = None) -> Decimal:
+    """Consumo PEN del mes del gerente frente a su límite mensual: abonos más reservas."""
+    abonos, reservas = consumo_mes_desglose(db, gerente_id, ahora)
+    return abonos + reservas
 
 
 def tiene_comprobante_activo(db: Session, deuda_id: uuid.UUID) -> bool:
