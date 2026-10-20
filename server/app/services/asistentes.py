@@ -233,11 +233,13 @@ def consulta_asistentes(gerente: Usuario) -> Select[Usuario]:
 
 
 def bloquear_asistente_propia(db: Session, gerente: Usuario, asistente_id: uuid.UUID) -> Usuario:
-    """Asistente del gerente bloqueada y releída; si no existe, es ajena o fue eliminada, 404."""
+    """Asistente del gerente bloqueada y releída; si no existe, es ajena o fue eliminada, 404.
+    Sin bloquear las llaves foráneas, como bloquear_gerente; sigue esperando al FOR SHARE con que
+    app/services/ordenes.py relee a la asistente mientras ella responde una orden."""
     asistente = db.scalar(
         consulta_asistentes(gerente)
         .where(Usuario.id == asistente_id)
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
     if asistente is None:
@@ -249,7 +251,7 @@ def bloquear_activa(db: Session, gerente: Usuario) -> Usuario | None:
     return db.scalar(
         consulta_asistentes(gerente)
         .where(Usuario.estado == "activa")
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
 
