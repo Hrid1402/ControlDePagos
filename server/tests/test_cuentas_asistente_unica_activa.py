@@ -263,3 +263,116 @@ def test_ca02_dos_activaciones_simultaneas_nunca_dejan_dos_asistentes_activas() 
                 {"gid": gerente_id},
             )
             db_clean.commit()
+
+
+def test_ca17_detalle_asistente_datos_estado_creacion_e_historial(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """CA17: El detalle muestra datos, estado, fecha de creación e historial de activaciones."""
+    from app.services.asistentes import detalle_asistente
+
+    gerente = dos_gerentes.uno.gerente
+    gerente.nombres, gerente.apellidos = "Mariana", "Salazar"
+    db.commit()
+
+    # 1. Cuenta nueva sin cambios de estado: historial vacío
+    nueva = crear_asistente_modelo(db, gerente, "SinHistorial", horas_atras=1)
+    detalle_inicial = detalle_asistente(db, gerente, nueva.id)
+    assert detalle_inicial.asistente.id == nueva.id
+    assert detalle_inicial.historial == []
+
+    # Verificación por API HTTP GET /api/v1/asistentes/{id}
+    r_init = cliente.get(f"{URL}/{nueva.id}", headers=auth_headers(gerente))
+    assert r_init.status_code == 200
+    datos_init = r_init.json()
+    assert datos_init["id"] == str(nueva.id)
+    assert datos_init["nombres"] == "SinHistorial"
+    assert datos_init["apellidos"] == "Gómez"
+    assert datos_init["estado"] == "inactiva"
+    assert datos_init["creado_en"] is not None
+    assert datos_init["historial"] == []
+
+    # 2. Registrar ciclo de activación y desactivación
+    cliente.post(f"{URL}/{nueva.id}/activar", headers=auth_headers(gerente))
+    cliente.post(f"{URL}/{nueva.id}/desactivar", headers=auth_headers(gerente))
+
+    # Consultar detalle actualizado
+    r_actualizado = cliente.get(f"{URL}/{nueva.id}", headers=auth_headers(gerente))
+    assert r_actualizado.status_code == 200
+    datos_act = r_actualizado.json()
+    assert datos_act["id"] == str(nueva.id)
+    assert datos_act["estado"] == "inactiva"
+
+    historial = datos_act["historial"]
+    assert len(historial) == 2
+    # El historial se ordena del más reciente al más antiguo
+    assert [ev["accion"] for ev in historial] == ["desactivada", "activada"]
+    assert all(ev["realizada_por"] == "Mariana Salazar" for ev in historial)
+    assert all("creado_en" in ev for ev in historial)
+
+
+def test_ca17_aislamiento_multitenancy_ninguna_cuenta_ajena_visible(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+    db: Session,
+) -> None:
+    """CA17 / Aislamiento: La consulta del gerente no cruza cuentas ajenas ni eliminadas."""
+    gerente1 = dos_gerentes.uno.gerente
+    asistente_g2 = dos_gerentes.dos.asistente
+
+    # Crear una asistente eliminada para gerente1
+    eliminada_g1 = crear_asistente_modelo(
+        db,
+        gerente1,
+        "Eliminada",
+        horas_atras=3,
+        eliminado_en=ahora_lima(),
+    )
+
+    # 1. En la lista de gerente1, nunca aparece la asistente de gerente2 ni la eliminada
+    r_lista = cliente.get(URL, headers=auth_headers(gerente1))
+    assert r_lista.status_code == 200
+    ids_en_lista = {item["id"] for item in r_lista.json()["items"]}
+    assert str(asistente_g2.id) not in ids_en_lista
+    assert str(eliminada_g1.id) not in ids_en_lista
+
+    # 2. Consultar el detalle de una asistente ajena responde 404 NO_ENCONTRADO sin fugar datos
+    r_ajena = cliente.get(f"{URL}/{asistente_g2.id}", headers=auth_headers(gerente1))
+    assert r_ajena.status_code == 404
+    assert r_ajena.json()["code"] == "NO_ENCONTRADO"
+
+    # 3. Consultar el detalle de una eliminada o inexistente responde 404 NO_ENCONTRADO
+    r_elim = cliente.get(f"{URL}/{eliminada_g1.id}", headers=auth_headers(gerente1))
+    assert r_elim.status_code == 404
+    assert r_elim.json()["code"] == "NO_ENCONTRADO"
+
+    r_random = cliente.get(f"{URL}/{uuid.uuid4()}", headers=auth_headers(gerente1))
+    assert r_random.status_code == 404
+    assert r_random.json()["code"] == "NO_ENCONTRADO"
+
+
+def test_ca17_autorizacion_asistente_y_anonimo_sin_acceso(
+    cliente: TestClient,
+    dos_gerentes: DosGerentes,
+) -> None:
+    """Autorización: Solo el rol gerente puede acceder a la lista y detalle de asistentes."""
+    asistente = dos_gerentes.uno.asistente
+
+    # Asistente intentando listar asistentes -> 403 SIN_PERMISO
+    r_lista_asistente = cliente.get(URL, headers=auth_headers(asistente))
+    assert r_lista_asistente.status_code == 403
+    assert r_lista_asistente.json()["code"] == "SIN_PERMISO"
+
+    # Asistente intentando consultar detalle -> 403 SIN_PERMISO
+    r_detalle_asistente = cliente.get(f"{URL}/{asistente.id}", headers=auth_headers(asistente))
+    assert r_detalle_asistente.status_code == 403
+    assert r_detalle_asistente.json()["code"] == "SIN_PERMISO"
+
+    # Usuario anónimo sin credenciales -> 401
+    r_anon_lista = cliente.get(URL)
+    assert r_anon_lista.status_code == 401
+
+    r_anon_detalle = cliente.get(f"{URL}/{asistente.id}")
+    assert r_anon_detalle.status_code == 401
