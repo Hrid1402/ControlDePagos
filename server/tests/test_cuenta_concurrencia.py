@@ -242,8 +242,10 @@ def test_dos_tokens_no_pueden_restablecer_a_la_misma_contrasena(
     ]
     resultados = [resultado(futuro) for futuro in futuros]
 
+    # El primero que bloquea al usuario cambia la contraseña y deja usados los demás enlaces
+    # pendientes; el segundo ya no puede usar el suyo, sea cual sea la contraseña que traiga.
     assert len([r for r in resultados if isinstance(r, str)]) == 1
-    assert codigos(resultados) == ["CONTRASENA_REPETIDA"]
+    assert codigos(resultados) == ["TOKEN_INVALIDO"]
     with SessionLocal() as db:
         usuario = db.get_one(Usuario, gerente)
         assert verificar_contrasena(nueva, usuario.password_hash)
@@ -260,4 +262,4 @@ def test_dos_tokens_no_pueden_restablecer_a_la_misma_contrasena(
                 select(TokenRestablecimiento).where(TokenRestablecimiento.usuario_id == gerente)
             )
         )
-        assert sum(r.usado_en is not None for r in registros) == 1
+        assert all(r.usado_en is not None for r in registros)
