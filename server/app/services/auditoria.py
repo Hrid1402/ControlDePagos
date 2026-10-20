@@ -7,7 +7,8 @@ con flush, pero el commit lo hace quien llama. Si la acción se deshace, el even
 import logging
 import uuid
 from collections.abc import Mapping
-from datetime import date, datetime, time
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen, gerente_de
 from app.core.errores import ErrorApi
+from app.core.tiempo import zona_horaria
 from app.models import Auditoria, Usuario
 
 # Registro técnico: eventos que no tienen gerente al que pertenecer.
@@ -166,3 +168,38 @@ def consulta_historial(usuario: Usuario) -> Select[Auditoria]:
         .where(Auditoria.gerente_id == usuario.id)
         .order_by(Auditoria.creado_en.desc(), Auditoria.id.desc())
     )
+
+
+@dataclass(frozen=True)
+class FiltrosHistorial:
+    usuario: str | None = None
+    accion: str | None = None
+    desde: date | None = None
+    hasta: date | None = None
+
+
+def consulta_historial_filtrado(gerente: Usuario, filtros: FiltrosHistorial) -> Select[Auditoria]:
+    """Aplica los mismos filtros al listado y a la exportación.
+
+    Un UUID busca la cuenta actual; un nombre permite encontrar registros de cuentas
+    eliminadas, cuyo usuario_id se vuelve NULL pero cuyo nombre queda conservado.
+    Las fechas de la interfaz son días completos en la zona configurada.
+    """
+    consulta = consulta_historial(gerente)
+    if filtros.usuario:
+        try:
+            usuario_id = uuid.UUID(filtros.usuario)
+        except ValueError:
+            patron = filtros.usuario.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            consulta = consulta.where(Auditoria.usuario_nombre.ilike(f"%{patron}%", escape="\\"))
+        else:
+            consulta = consulta.where(Auditoria.usuario_id == usuario_id)
+    if filtros.accion:
+        consulta = consulta.where(Auditoria.accion == filtros.accion)
+    if filtros.desde:
+        inicio = datetime.combine(filtros.desde, time.min, tzinfo=zona_horaria())
+        consulta = consulta.where(Auditoria.creado_en >= inicio.astimezone(UTC))
+    if filtros.hasta:
+        fin = datetime.combine(filtros.hasta + timedelta(days=1), time.min, tzinfo=zona_horaria())
+        consulta = consulta.where(Auditoria.creado_en < fin.astimezone(UTC))
+    return consulta
