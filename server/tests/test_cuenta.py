@@ -197,7 +197,9 @@ def test_ca07_cambiar_solo_las_mayusculas_es_el_mismo_usuario_y_no_gasta_un_camb
     assert cambios_hechos(db, gerente) == 0
 
 
-@pytest.mark.parametrize("nuevo", ["", "   ", "dos palabras", "a b", "x" * 51])
+@pytest.mark.parametrize(
+    "nuevo", ["", "   ", "dos palabras", "a b", "ab", "x" * 31, "ñandu", "a@b.com"]
+)
 def test_ca07_un_usuario_con_espacios_internos_o_fuera_de_largo_se_rechaza(
     cliente: TestClient, db: Session, equipos: DosGerentes, nuevo: str
 ) -> None:
@@ -433,6 +435,35 @@ def test_ca12_una_contrasena_de_mas_de_72_bytes_se_rechaza_en_su_campo(
     assert r.status_code == 422
     assert r.json()["field"] == "contrasena_nueva"
     assert gerente.password_hash == HASH
+
+
+def test_ca12_una_contrasena_de_pocos_caracteres_pero_mas_de_72_bytes_se_rechaza(
+    cliente: TestClient, equipos: DosGerentes
+) -> None:
+    gerente = equipos.uno.gerente
+
+    r = cambiar_contrasena(cliente, gerente, nueva="Ññ1-" * 13)
+
+    assert r.status_code == 422
+    assert r.json()["field"] == "contrasena_nueva"
+    assert gerente.password_hash == HASH
+
+
+@pytest.mark.parametrize(
+    "nueva", ["Aa1-aaa", "otra-clave-2", "OTRA-CLAVE-2", "Otra-clave", "OtraClave2"]
+)
+def test_ca13_la_nueva_exige_8_caracteres_mayuscula_minuscula_numero_y_simbolo(
+    cliente: TestClient, equipos: DosGerentes, nueva: str
+) -> None:
+    gerente = equipos.uno.gerente
+
+    r = cambiar_contrasena(cliente, gerente, nueva=nueva)
+
+    assert r.status_code == 422
+    assert r.json()["code"] == "VALIDACION"
+    assert r.json()["field"] == "contrasena_nueva"
+    assert gerente.password_hash == HASH
+    assert gerente.token_version == 0
 
 
 def test_ca12_cada_usuario_cambia_solo_su_propia_contrasena(

@@ -181,14 +181,20 @@ def test_rechazo_username_duplicado(cliente: TestClient, dos_gerentes: DosGerent
     [
         "corta",  # 5 caracteres
         "1234567",  # 7 caracteres
+        "sinmayuscula-1",
+        "SINMINUSCULA-1",
+        "Sin-numero",
+        "SinSimbolo1",
+        "Ññ1-" * 13,  # 52 caracteres, 78 bytes: bcrypt no la admite
     ],
 )
-def test_politica_contrasena_longitud_minima(
+def test_politica_contrasena_segura(
     cliente: TestClient,
     dos_gerentes: DosGerentes,
+    db: Session,
     contrasena_invalida: str,
 ) -> None:
-    """Rechaza contraseñas menores a 8 caracteres con 422."""
+    """Rechaza con 422 las contraseñas que no cumplen H02 CA13 o superan 72 bytes."""
     gerente = dos_gerentes.uno.gerente
     payload = {
         "nombres": "Lorena",
@@ -197,6 +203,20 @@ def test_politica_contrasena_longitud_minima(
     }
     r = cliente.post(ASISTENTES_URL, json=payload, headers=auth_headers(gerente))
     assert r.status_code == 422
+    assert r.json()["field"] == "contrasena"
+    assert db.scalar(select(Usuario).where(Usuario.nombres == "Lorena")) is None
+
+
+@pytest.mark.parametrize("username", ["ab", "a" * 31, "dos palabras", "ñandu", "a@b.com"])
+def test_username_elegido_fuera_de_la_regla_comun(
+    cliente: TestClient, dos_gerentes: DosGerentes, username: str
+) -> None:
+    """El username elegido sigue ck_usuario_username: uno de 31 caracteres no llega a la base."""
+    gerente = dos_gerentes.uno.gerente
+    payload = {"nombres": "Lorena", "apellidos": "Quispe", "username": username}
+    r = cliente.post(ASISTENTES_URL, json=payload, headers=auth_headers(gerente))
+    assert r.status_code == 422
+    assert r.json()["field"] == "username"
 
 
 def test_rechazo_por_permisos_solo_gerente(
