@@ -24,9 +24,11 @@ from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.seguridad import hashear_contrasena, verificar_contrasena
 from app.models import CambioUsuario, HistorialContrasena, TokenRestablecimiento, Usuario
+from app.schemas.usuarios import ActualizarPerfilEntrada
 from app.services.acceso import restablecer_contrasena
 from app.services.asistentes import restablecer_contrasena_asistente
 from app.services.cuenta import cambiar_contrasena, cambiar_usuario
+from app.services.usuarios import actualizar_perfil
 
 ORIGEN = Origen(dispositivo="pruebas", ip=None)
 SEGUNDOS_MAXIMOS = 15
@@ -173,6 +175,43 @@ def test_dos_cuentas_que_toman_el_mismo_usuario_simultaneamente_solo_una_lo_logr
             select(Usuario.id).where(func.lower(Usuario.username) == disputado.lower())
         ).all()
         assert len(con_el_usuario) == 1
+
+
+@pytest.mark.parametrize(
+    ("campos", "codigo"),
+    [
+        ({"tipo_documento": "pasaporte", "numero_documento": "PX{marca}"}, "DOCUMENTO_DUPLICADO"),
+        ({"correo": "disputado.{marca}@correo.pe"}, "CORREO_DUPLICADO"),
+    ],
+)
+def test_dos_cuentas_que_guardan_el_mismo_dato_unico_solo_una_lo_logra(
+    gerentes: Callable[..., list[uuid.UUID]],
+    hilos: ThreadPoolExecutor,
+    campos: dict[str, str],
+    codigo: str,
+) -> None:
+    """La consulta previa no ve el dato que la otra cuenta aún no confirma: la unicidad de la base
+    decide y la que pierde recibe el mismo 409 que si lo hubiera visto, no un 500."""
+    uno, dos = gerentes(2)
+    salida = threading.Barrier(2, timeout=SEGUNDOS_MAXIMOS)
+    marca = uuid.uuid4().hex[:7].upper()
+    datos = ActualizarPerfilEntrada(
+        nombres="Ana",
+        apellidos="Rojas",
+        celular="987654321",
+        **{campo: valor.format(marca=marca) for campo, valor in campos.items()},
+    )
+
+    futuros = [
+        hilos.submit(
+            solicitud, quien, lambda db, u: actualizar_perfil(db, u, datos, ORIGEN), salida
+        )
+        for quien in (uno, dos)
+    ]
+    resultados = [resultado(f) for f in futuros]
+
+    assert codigos(resultados) == [codigo]
+    assert sum(isinstance(r, Usuario) for r in resultados) == 1
 
 
 def test_dos_cambios_de_contrasena_simultaneos_con_la_misma_actual_solo_uno_se_aplica(
