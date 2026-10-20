@@ -12,4 +12,12 @@ descarta en lugar de acumularse; la ejecución siguiente recupera lo pendiente.
 
 from typing import Any
 
-HORARIOS: dict[str, dict[str, Any]] = {}
+from celery.schedules import crontab
+
+HORARIOS: dict[str, dict[str, Any]] = {
+    "latido": {
+        "task": "app.workers.latido.latido",
+        "schedule": crontab(minute="*/5"),
+        "options": {"expires": 4 * 60},
+    },
+}

@@ -35,7 +35,7 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     task_cls="app.workers.base:TareaBase",
-    include=[],
+    include=["app.workers.latido"],
 )
 celery_app.conf.update(
     task_serializer="json",
