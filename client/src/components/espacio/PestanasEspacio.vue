@@ -17,12 +17,19 @@ const pestanas = computed(() =>
     nombre: nombreRuta(props.rol, seccion.clave),
   })),
 )
+// Una pestaña sigue marcada en sus subpáginas, por ejemplo el detalle de una asistente.
+function esActual(pestana: { nombre: string; clave: string }) {
+  return (
+    pestana.nombre === route.name ||
+    (!!pestana.clave && route.path.startsWith(`/${props.rol}/${pestana.clave}/`))
+  )
+}
 const secundarias = computed(() => pestanas.value.filter((p) => !p.principal))
-const secundariaActiva = computed(() => secundarias.value.some((p) => p.nombre === route.name))
+const secundariaActiva = computed(() => secundarias.value.some(esActual))
 const opcionesMas = computed<MenuItem[]>(() =>
   secundarias.value.map((p) => ({
     label: p.etiqueta,
-    class: p.nombre === route.name ? 'opcion-activa' : undefined,
+    class: esActual(p) ? 'opcion-activa' : undefined,
     command: () => void router.push({ name: p.nombre }),
   })),
 )
@@ -34,9 +41,15 @@ const opcionesMas = computed<MenuItem[]>(() =>
       <li
         v-for="pestana in pestanas"
         :key="pestana.nombre"
-        :class="{ secundaria: !pestana.principal, actual: pestana.nombre === route.name }"
+        :class="{ secundaria: !pestana.principal, actual: esActual(pestana) }"
       >
-        <RouterLink :to="{ name: pestana.nombre }" exact-active-class="activa">
+        <RouterLink
+          :to="{ name: pestana.nombre }"
+          :class="{ activa: esActual(pestana) }"
+          active-class=""
+          exact-active-class=""
+          :aria-current="esActual(pestana) ? 'page' : undefined"
+        >
           {{ pestana.etiqueta }}
         </RouterLink>
       </li>

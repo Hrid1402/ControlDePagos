@@ -40,9 +40,19 @@ export const rutas: RouteRecordRaw[] = [
       ...SECCIONES[rol].map((seccion) => ({
         path: seccion.clave,
         name: nombreRuta(rol, seccion.clave),
-        component: () => import('@/pages/SeccionPendientePage.vue'),
+        component: seccion.pagina ?? (() => import('@/pages/SeccionPendientePage.vue')),
         meta: { titulo: seccion.etiqueta },
       })),
+      ...(rol === 'gerente'
+        ? [
+            {
+              path: 'asistentes/:id',
+              name: 'gerente-asistente',
+              component: () => import('@/pages/AsistenteDetallePage.vue'),
+              meta: { titulo: 'Asistente' },
+            },
+          ]
+        : []),
       {
         path: CUENTA,
         name: nombreRuta(rol, CUENTA),
