@@ -38,6 +38,8 @@ class Accion(StrEnum):
     PAGO_INICIADO = "pago_iniciado"
     PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
     APROBACION_SOLICITADA = "aprobacion_solicitada"
+    PERFIL_ACTUALIZADO = "perfil_actualizado"
+    POLITICA_ACEPTADA = "politica_aceptada"
     DEUDA_FIJADA = "deuda_fijada"
     DEUDA_POSPUESTA = "deuda_pospuesta"
 
