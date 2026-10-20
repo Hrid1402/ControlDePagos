@@ -31,6 +31,8 @@ def test_la_configuracion_lee_cors_smtp_s3_y_redis_del_entorno(
         "REDIS_URL": "redis://redis:6379/1",
         "JWT_SECRET": "clave-de-prueba-clave-de-prueba",
         "CORS_ORIGINS": '["https://pagos.example.com", "http://localhost:5173"]',
+        "LOGIN_INTENTOS_MAXIMOS": "3",
+        "LOGIN_MINUTOS_BLOQUEO": "10",
         "SMTP_HOST": "smtp.example.com",
         "SMTP_PORT": "587",
         "SMTP_FROM": "avisos@example.com",
@@ -55,6 +57,8 @@ def test_la_configuracion_lee_cors_smtp_s3_y_redis_del_entorno(
     assert config.s3_endpoint == "https://s3.example.com"
     assert config.s3_bucket == "comprobantes"
     assert config.s3_secret_key == "secreto"
+    assert config.login_intentos_maximos == 3
+    assert config.login_minutos_bloqueo == 10
 
 
 def test_la_configuracion_exige_s3(monkeypatch: pytest.MonkeyPatch) -> None:

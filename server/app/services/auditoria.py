@@ -34,6 +34,7 @@ class Accion(StrEnum):
     CUENTA_ELIMINADA = "cuenta_eliminada"
     DEUDA_MONTO_CAMBIADO = "deuda_monto_cambiado"
     DEUDA_ESTADO_CAMBIADO = "deuda_estado_cambiado"
+    CONTRASENA_RESTABLECIDA = "contrasena_restablecida"
     PAGO_INICIADO = "pago_iniciado"
     PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
     APROBACION_SOLICITADA = "aprobacion_solicitada"
