@@ -1,4 +1,5 @@
 import { computed, inject, onScopeDispose, ref } from 'vue'
+import { controlSesionKey } from '@/services/controlSesion'
 import { useOnline } from '@vueuse/core'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -25,6 +26,9 @@ export function useFormulario(opciones: OpcionesFormulario) {
   const confirmacion = useConfirm()
   const toast = useToast()
   const router = inject(routerKey, null)
+  const controlSesion = inject(controlSesionKey, null)
+  const tieneCambios = () => formulario.meta.value.dirty
+  controlSesion?.formularios.add(tieneCambios)
   const puedeGuardar = computed(
     () => online.value && formulario.meta.value.dirty && !formulario.isSubmitting.value,
   )
@@ -68,7 +72,8 @@ export function useFormulario(opciones: OpcionesFormulario) {
     event.returnValue = ''
   }
   window.addEventListener('beforeunload', antesDeCerrar)
-  const quitarGuard = router?.beforeEach(() => {
+  const quitarGuard = router?.beforeEach((destino) => {
+    if (destino.name === 'login' && controlSesion && !controlSesion.sesion.token) return true
     if (!formulario.meta.value.dirty) return true
     return new Promise<boolean>((resolve) => {
       confirmacion.require({
@@ -86,6 +91,7 @@ export function useFormulario(opciones: OpcionesFormulario) {
   onScopeDispose(() => {
     window.removeEventListener('beforeunload', antesDeCerrar)
     quitarGuard?.()
+    controlSesion?.formularios.delete(tieneCambios)
   })
 
   return { ...formulario, online, aviso, puedeGuardar, enviar }
