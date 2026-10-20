@@ -68,7 +68,8 @@ async function guardar(valores: Record<string, unknown>) {
         <div class="credencial">
           <CampoOpciones nombre="modo_usuario" etiqueta="Usuario" :opciones="MODOS" />
           <p v-if="valores.modo_usuario === 'generar'" class="nota">
-            Lo generamos a partir de sus nombres; si ya existe, le agregamos un número.
+            Usaremos la inicial de su nombre y su primer apellido, como lgomez. Si ya existe, le
+            agregamos un número.
           </p>
           <CampoUsuarioDisponible v-else />
         </div>

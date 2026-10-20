@@ -47,7 +47,7 @@ def test_ca04_crear_asistente_solo_nombres_y_apellidos(
 
     assert data["nombres"] == "Lucía Mariana"
     assert data["apellidos"] == "Gómez Flores"
-    assert "lucia.gomez" in data["username"].lower()
+    assert data["username"] == "lgomez"
     assert len(data["contrasena"]) >= 12
     assert data["contrasena_inicial"] is True
     assert data["estado"] == "activa"
@@ -387,3 +387,38 @@ def test_concurrencia_creacion_asistentes() -> None:
                 {"gid": gerente_id},
             )
             db_cleanup.commit()
+
+
+@pytest.mark.parametrize(
+    ("nombres", "apellidos", "esperado"),
+    [
+        ("Lucía Mariana", "Gómez Flores", "lgomez"),
+        ("Ñuflo", "Muñoz", "nmunoz"),
+        ("José", "De la Cruz Pérez", "jdelacruz"),
+        ("Rosa", "del Águila", "rdelaguila"),
+        ("Ana María", "O'Higgins", "aohiggins"),
+    ],
+)
+def test_ca05_el_usuario_generado_es_inicial_y_primer_apellido(
+    nombres: str, apellidos: str, esperado: str
+) -> None:
+    from app.services.asistentes import generar_username_base
+
+    assert generar_username_base(nombres, apellidos) == esperado
+
+
+def test_ca05_si_el_usuario_existe_o_es_muy_corto_se_le_agrega_un_numero(
+    cliente: TestClient, dos_gerentes: DosGerentes
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    datos = {"nombres": "Rosa", "apellidos": "Melgar Díaz"}
+
+    primera = cliente.post(ASISTENTES_URL, json=datos, headers=auth_headers(gerente))
+    segunda = cliente.post(ASISTENTES_URL, json=datos, headers=auth_headers(gerente))
+    corta = cliente.post(
+        ASISTENTES_URL, json={"nombres": "Li", "apellidos": "U"}, headers=auth_headers(gerente)
+    )
+
+    assert primera.json()["username"] == "rmelgar"
+    assert segunda.json()["username"] == "rmelgar1"
+    assert corta.json()["username"] == "lu1"
