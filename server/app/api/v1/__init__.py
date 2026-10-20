@@ -5,9 +5,11 @@ from app.api.v1 import (
     auditoria,
     auth,
     bandeja,
+    empresas,
     me,
     ordenes,
     pagos,
+    servicios,
     tiempo_real,
     usuarios,
 )
@@ -19,8 +21,10 @@ router.include_router(asistentes.router)
 router.include_router(auditoria.router)
 router.include_router(auth.router)
 router.include_router(bandeja.router)
+router.include_router(empresas.router)
 router.include_router(me.router)
 router.include_router(ordenes.router)
 router.include_router(pagos.router)
+router.include_router(servicios.router)
 router.include_router(tiempo_real.router)
 router.include_router(usuarios.router)

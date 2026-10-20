@@ -1,5 +1,8 @@
 """Comando administrativo que crea el gerente y sus categorías precargadas (TASK-27).
 
+También completa el catálogo de empresas comunes (TASK-33), que comparten todos los gerentes:
+quien ya tenga su gerente lo vuelve a ejecutar para cargarlas.
+
 Uso, desde la raíz del repositorio: pnpm init:gerente
 
 Lee los datos de las variables de entorno del proceso, no del archivo .env: GERENTE_USERNAME,
@@ -28,6 +31,7 @@ from app.core.database import SessionLocal
 from app.core.dependencias import Origen
 from app.core.reglas import validar_contrasena
 from app.schemas.inicializacion import DatosGerente
+from app.services.empresas import EmpresasSincronizadas, sincronizar_empresas
 from app.services.inicializacion import (
     ConflictoInicializacion,
     Inicializacion,
@@ -129,7 +133,7 @@ def leer_contrasena(entorno: Mapping[str, str], consola: Consola) -> str:
         raise EntradaInvalida(str(error)) from None
 
 
-def informar(resultado: Inicializacion, consola: Consola) -> None:
+def informar(resultado: Inicializacion, empresas: EmpresasSincronizadas, consola: Consola) -> None:
     username = resultado.gerente.username
     if resultado.creado:
         consola.escribir(f"Gerente '{username}' creado.")
@@ -153,6 +157,13 @@ def informar(resultado: Inicializacion, consola: Consola) -> None:
             "Ya había categorías propias con el nombre de una precargada y se dejaron como "
             "están: " + ", ".join(categorias.manuales) + "."
         )
+    actualizadas = (
+        f", {len(empresas.actualizadas)} con patrón nuevo" if empresas.actualizadas else ""
+    )
+    consola.escribir(
+        f"Empresas comunes: {len(empresas.creadas)} creadas{actualizadas}, "
+        f"{len(empresas.existentes)} ya existían."
+    )
 
 
 def ejecutar(
@@ -170,7 +181,10 @@ def ejecutar(
             # El conflicto se informa antes de pedir una contraseña que no se usaría.
             validar_existente(existente)
         resultado = inicializar_gerente(db, datos, contrasena, ORIGEN)
-    informar(resultado, consola)
+        # El catálogo es común a todos los gerentes: se completa en cada ejecución.
+        empresas = sincronizar_empresas(db)
+        db.commit()
+    informar(resultado, empresas, consola)
     return EXITO
 
 

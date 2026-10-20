@@ -12,6 +12,14 @@ crédito, Préstamo y Otros.
 Requiere la base migrada (`cd server && uv run alembic upgrade head`) y usa la `DATABASE_URL` de
 `server/.env`.
 
+En cada ejecución también sincroniza el catálogo de empresas comunes que se eligen al registrar
+un servicio (Hidrandina, Enel, Luz del Sur, Sedalib, Sedapal, Cálidda, Quavii, Movistar, Claro,
+Entel y Bitel). El catálogo es uno solo para todos los gerentes y está en
+`app/services/empresas.py`. **Si ya tienes tu gerente creado, vuelve a ejecutar
+`pnpm init:gerente` con su username para cargar las empresas**: no cambia su contraseña ni sus
+datos. Cuando se agrega a la constante el patrón verificado del código de suministro de una
+empresa, ejecutarlo de nuevo lo aplica.
+
 ### Uso interactivo (recomendado)
 
 ```bash
@@ -68,6 +76,7 @@ cuentas ni categorías. El username se compara sin distinguir mayúsculas.
 | Ya hay una categoría propia con el nombre de una precargada | La deja como está y avisa |
 | Es de una asistente, de un gerente inactivo o de una cuenta eliminada | Conflicto, sin cambios |
 | El correo ya lo usa otra cuenta | Conflicto, sin cambios |
+| Faltan empresas comunes o hay un patrón nuevo en la constante | Crea las que faltan y aplica el patrón; no duplica ni borra empresas |
 
 Un username distinto crea otro gerente con sus propias categorías.
 

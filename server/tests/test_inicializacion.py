@@ -20,10 +20,11 @@ from sqlalchemy.orm import Session
 from app.comandos import inicializar_gerente as comando
 from app.comandos.inicializar_gerente import Consola, main
 from app.core.seguridad import verificar_contrasena
-from app.models import Auditoria, Categoria, HistorialContrasena, Usuario
+from app.models import Auditoria, Categoria, Empresa, HistorialContrasena, Usuario
 from app.schemas.inicializacion import DatosGerente
 from app.services.acceso import iniciar_sesion
 from app.services.auditoria import Accion
+from app.services.empresas import EMPRESAS_COMUNES
 from app.services.inicializacion import (
     CATEGORIAS_PRECARGADAS,
     ConflictoInicializacion,
@@ -62,7 +63,7 @@ def auditoria_de(db: Session, gerente_id: uuid.UUID) -> list[Auditoria]:
 def conteos(db: Session) -> tuple[int | None, ...]:
     return tuple(
         db.scalar(select(func.count()).select_from(modelo))
-        for modelo in (Usuario, Categoria, Auditoria, HistorialContrasena)
+        for modelo in (Usuario, Categoria, Auditoria, HistorialContrasena, Empresa)
     )
 
 
@@ -346,6 +347,12 @@ ENTORNO = {"GERENTE_USERNAME": USERNAME, "GERENTE_CONTRASENA": CONTRASENA}
 
 def test_comando_crea_y_luego_no_cambia_nada(db: Session, caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
+    total = len(EMPRESAS_COMUNES)
+    ya_cargadas = db.scalar(
+        select(func.count())
+        .select_from(Empresa)
+        .where(Empresa.id.in_(e.id for e in EMPRESAS_COMUNES))
+    )
 
     codigo, primera = ejecutar(db, ENTORNO)
     antes = conteos(db)
@@ -354,10 +361,12 @@ def test_comando_crea_y_luego_no_cambia_nada(db: Session, caplog: pytest.LogCapt
     assert (codigo, codigo_repetido) == (0, 0)
     assert primera.salida.getvalue() == (
         f"Gerente '{USERNAME}' creado.\nCategorías precargadas: 7 creadas, 0 ya existían.\n"
+        f"Empresas comunes: {total - (ya_cargadas or 0)} creadas, {ya_cargadas} ya existían.\n"
     )
     assert segunda.salida.getvalue() == (
         f"Gerente '{USERNAME}' ya existía; no se modificaron su contraseña ni sus datos.\n"
         "Categorías precargadas: 0 creadas, 7 ya existían.\n"
+        f"Empresas comunes: 0 creadas, {total} ya existían.\n"
     )
     assert conteos(db) == antes
     [gerente] = gerentes_con(db, USERNAME)
