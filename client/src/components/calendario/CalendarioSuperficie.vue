@@ -46,13 +46,15 @@ const fechaActiva = computed(() => {
   const [anio = 0, mes = 1, dia = 1] = diaSeleccionado.value.split('-').map(Number)
   return new Date(anio, mes - 1, dia)
 })
-const totalVencimientos = computed(() => props.dias.reduce((total, dia) => total + dia.deudas.length, 0))
+const totalVencimientos = computed(() =>
+  props.dias.reduce((total, dia) => total + dia.deudas.length, 0),
+)
 
 watch(
   [fechas, categoria, estado],
   () => {
     const primera = fechas.value[0]
-    const ultima = fechas.value.at(-1)
+    const ultima = fechas.value[fechas.value.length - 1]
     if (primera && ultima) emit('periodo', claveFecha(primera), claveFecha(ultima))
     emit('filtrar', { categoria: categoria.value, estado: estado.value })
   },
@@ -121,7 +123,7 @@ function moneda(valor: string, codigo: string): string {
       </div>
       <div class="vistas" role="group" aria-label="Vista del calendario">
         <button
-          v-for="opcion in (['mes', 'semana', 'lista'] as const)"
+          v-for="opcion in ['mes', 'semana', 'lista'] as const"
           :key="opcion"
           type="button"
           :aria-pressed="vista === opcion"
@@ -172,7 +174,11 @@ function moneda(valor: string, codigo: string): string {
     </div>
     <div v-else class="cuerpo" :class="{ 'cuerpo--lista': vista === 'lista' }">
       <div class="tablero">
-        <div v-if="vista !== 'lista'" class="rejilla" :class="{ 'rejilla--semana': vista === 'semana' }">
+        <div
+          v-if="vista !== 'lista'"
+          class="rejilla"
+          :class="{ 'rejilla--semana': vista === 'semana' }"
+        >
           <div v-for="nombre in DIAS_SEMANA" :key="nombre" class="nombre-dia">{{ nombre }}</div>
           <button
             v-for="dia in fechas"
@@ -197,7 +203,10 @@ function moneda(valor: string, codigo: string): string {
                 :class="`marca-estado--${colorEstado(deuda.estado)}`"
               ></span>
             </span>
-            <span v-if="diasPorFecha.get(claveFecha(dia))?.totales_confirmados.PEN" class="monto-dia">
+            <span
+              v-if="diasPorFecha.get(claveFecha(dia))?.totales_confirmados.PEN"
+              class="monto-dia"
+            >
               {{ moneda(diasPorFecha.get(claveFecha(dia))!.totales_confirmados.PEN!, 'PEN') }}
             </span>
           </button>
@@ -254,10 +263,12 @@ function moneda(valor: string, codigo: string): string {
           </button>
           <div class="totales" aria-label="Totales del día">
             <p v-for="(valor, codigo) in diaActivo.totales_confirmados" :key="codigo">
-              <span>Total confirmado · {{ codigo }}</span><strong>{{ moneda(valor, codigo) }}</strong>
+              <span>Total confirmado · {{ codigo }}</span
+              ><strong>{{ moneda(valor ?? '0.00', codigo) }}</strong>
             </p>
             <p v-for="(valor, codigo) in diaActivo.totales_proyectados" :key="codigo">
-              <span>Proyección sin recibo · {{ codigo }}</span><strong>{{ moneda(valor, codigo) }}</strong>
+              <span>Proyección sin recibo · {{ codigo }}</span
+              ><strong>{{ moneda(valor ?? '0.00', codigo) }}</strong>
             </p>
           </div>
         </div>
@@ -270,7 +281,11 @@ function moneda(valor: string, codigo: string): string {
     </div>
     <footer class="leyenda" aria-label="Estados de las deudas">
       <span v-for="clave in ['pendiente', 'pagada', 'vencida', 'esperando_recibo']" :key="clave">
-        <i class="marca-estado" :class="`marca-estado--${colorEstado(clave)}`" aria-hidden="true"></i>
+        <i
+          class="marca-estado"
+          :class="`marca-estado--${colorEstado(clave)}`"
+          aria-hidden="true"
+        ></i>
         {{ nombreEstado(clave) }}
       </span>
     </footer>

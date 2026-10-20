@@ -28,7 +28,7 @@ export function fechasVisibles(fecha: Date, vista: VistaCalendario): Date[] {
     const primerDia = new Date(fecha.getFullYear(), fecha.getMonth(), 1)
     const inicio = inicioSemana(primerDia)
     const ultimoDia = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0)
-    const semanas = Math.ceil((ultimoDia.getTime() - inicio.getTime()) / 86400000 / 7 + 1)
+    const semanas = Math.ceil((((primerDia.getDay() + 6) % 7) + ultimoDia.getDate()) / 7)
     return Array.from({ length: semanas * 7 }, (_, indice) => sumarDias(inicio, indice))
   }
   const inicio = inicioSemana(fecha)
