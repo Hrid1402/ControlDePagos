@@ -18,15 +18,14 @@ from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.busqueda import contiene
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.models import Categoria, Deuda, Empresa, Recurrencia, Servicio, Usuario
 from app.schemas.servicios import FiltroEstado, ServicioEntrada
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
 from app.services.empresas import cumple_patron, empresa_del_catalogo
-
-# Deudas que ya no se cobran: no cuentan para la advertencia de cambio de código.
-ESTADOS_CERRADOS = ("pagada", "anulada")
+from app.services.saldo import ESTADOS_CERRADOS
 
 CAMPOS_AUDITADOS = (
     "categoria_id",
@@ -374,12 +373,10 @@ def consulta_servicios(
     if filtros.estado != "todos":
         consulta = consulta.where(Servicio.estado == filtros.estado)
     if filtros.q:
-        patron = filtros.q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        buscado = f"%{patron}%"
         consulta = consulta.where(
             or_(
                 *(
-                    columna.ilike(buscado, escape="\\")
+                    contiene(columna, filtros.q)
                     for columna in (
                         Servicio.alias,
                         Servicio.titular,

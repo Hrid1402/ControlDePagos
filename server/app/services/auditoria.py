@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from app.core.busqueda import contiene
 from app.core.dependencias import Origen, gerente_de
 from app.core.errores import ErrorApi
 from app.core.tiempo import zona_horaria
@@ -201,8 +202,7 @@ def consulta_historial_filtrado(gerente: Usuario, filtros: FiltrosHistorial) -> 
         try:
             usuario_id = uuid.UUID(filtros.usuario)
         except ValueError:
-            patron = filtros.usuario.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            consulta = consulta.where(Auditoria.usuario_nombre.ilike(f"%{patron}%", escape="\\"))
+            consulta = consulta.where(contiene(Auditoria.usuario_nombre, filtros.usuario))
         else:
             consulta = consulta.where(Auditoria.usuario_id == usuario_id)
     if filtros.accion:

@@ -1,7 +1,7 @@
 """Calendario por gerente, filtros, totales por moneda e importación ICS."""
 
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.seguridad import crear_token
+from app.core.tiempo import zona_horaria
 from app.main import app
 from app.models import Recurrencia, Servicio, Usuario
+from app.services import calendario
 from tests.conftest import DosGerentes, nueva_deuda
 
 RUTA = "/api/v1/calendario"
@@ -101,3 +103,32 @@ def test_rango_invertido_rechazado(cliente: TestClient, dos_gerentes: DosGerente
     )
     assert respuesta.status_code == 422
     assert respuesta.json()["field"] == "desde"
+
+
+def test_vencida_es_la_misma_del_listado_y_la_bandeja(
+    cliente: TestClient,
+    db: Session,
+    dos_gerentes: DosGerentes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vencida no es solo la pendiente: toda deuda no pagada ni anulada con el vencimiento ya
+    pasado en Lima. Una que vence hoy todavía no está vencida."""
+    monkeypatch.setattr(
+        calendario, "ahora_lima", lambda: datetime(2026, 10, 20, 23, 30, tzinfo=zona_horaria())
+    )
+    gerente = dos_gerentes.uno.gerente
+    vence = date(2026, 10, 15)
+    parcial = nueva_deuda(db, gerente, estado="pagada_parcial", fecha_vencimiento=vence)
+    sin_recibo = nueva_deuda(db, gerente, None, estado="esperando_recibo", fecha_vencimiento=vence)
+    pagada = nueva_deuda(db, gerente, estado="pagada", fecha_vencimiento=vence)
+    hoy = nueva_deuda(db, gerente, fecha_vencimiento=date(2026, 10, 20))
+
+    dias = cliente.get(RUTA, params=RANGO, headers=cabecera(gerente)).json()["dias"]
+
+    estados = {d["id"]: d["estado"] for dia in dias for d in dia["deudas"]}
+    assert estados == {
+        str(parcial.id): "vencida",
+        str(sin_recibo.id): "vencida",
+        str(pagada.id): "pagada",
+        str(hoy.id): "pendiente",
+    }

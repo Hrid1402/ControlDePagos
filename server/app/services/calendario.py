@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.tiempo import ahora_lima
 from app.models import Deuda, Recurrencia, Servicio
+from app.services.saldo import vencida
 
 ESTADOS_PENDIENTES = frozenset(
     {
@@ -37,7 +38,7 @@ def vencimientos(
     """Devuelve días ordenados con importes confirmados y proyecciones por moneda."""
     hoy = hoy or ahora_lima().date()
     consulta = (
-        select(Deuda, Servicio, Recurrencia)
+        select(Deuda, Servicio, Recurrencia, vencida(hoy))
         .join(Servicio, Servicio.id == Deuda.servicio_id)
         .outerjoin(Recurrencia, Recurrencia.servicio_id == Servicio.id)
         .where(
@@ -52,12 +53,8 @@ def vencimientos(
     if categoria_id is not None:
         consulta = consulta.where(Servicio.categoria_id == categoria_id)
     dias: dict[date, dict] = {}
-    for deuda, servicio, recurrencia in db.execute(consulta):
-        visible = (
-            "vencida"
-            if deuda.estado == "pendiente" and deuda.fecha_vencimiento < hoy
-            else deuda.estado
-        )
+    for deuda, servicio, recurrencia, es_vencida in db.execute(consulta):
+        visible = "vencida" if es_vencida else deuda.estado
         if estado is not None and visible != estado:
             continue
         fecha = deuda.fecha_vencimiento

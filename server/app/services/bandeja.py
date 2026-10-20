@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session, aliased
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.core.paginacion import Paginacion
-from app.core.tiempo import ahora_lima, zona_horaria
+from app.core.tiempo import ahora_lima, hoy_de, zona_horaria
 from app.models import (
     Categoria,
     Comprobante,
@@ -48,7 +48,7 @@ from app.models import (
 )
 from app.services.auditoria import Accion, registrar_auditoria
 from app.services.pagos import bloquear_deuda
-from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO, aplicado_validado
+from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO, aplicado_validado, vencida
 
 ESTADOS_POR_PAGAR = ("pendiente", "pagada_parcial", "esperando_aprobacion", "con_problema")
 # Solo se pospone lo que nadie está pagando: ocultar un intento en curso haría perderlo de vista.
@@ -107,10 +107,6 @@ class Bandeja:
         return self.contadores[self.pestana]
 
 
-def hoy_de(ahora: datetime) -> date:
-    return ahora.astimezone(zona_horaria()).date()
-
-
 def manana_a_las_ocho(ahora: datetime) -> datetime:
     """08:00 del día siguiente en la zona del sistema, aunque se pida pasada la medianoche."""
     return datetime.combine(hoy_de(ahora) + timedelta(days=1), HORA_RECORDAR, zona_horaria())
@@ -149,7 +145,7 @@ def nivel_de(hoy: date) -> ColumnElement[int]:
     return case(
         (OrdenPago.id.is_not(None), 0),
         (Deuda.fijada, 1),
-        (Deuda.fecha_vencimiento < hoy, 2),
+        (vencida(hoy), 2),
         (Deuda.fecha_vencimiento == hoy, 3),
         (Categoria.tipo == "tarjeta", 4),
         else_=5,

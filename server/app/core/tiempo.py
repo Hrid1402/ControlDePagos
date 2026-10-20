@@ -3,7 +3,7 @@
 Las fechas se guardan en UTC y los cortes de día y de mes se calculan en esta zona.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -15,3 +15,9 @@ def zona_horaria() -> ZoneInfo:
 
 def ahora_lima() -> datetime:
     return datetime.now(zona_horaria())
+
+
+def hoy_de(ahora: datetime) -> date:
+    """Fecha de ahora en la zona del sistema. Se calcula aquí y llega a SQL como parámetro: la base
+    guarda UTC y su CURRENT_DATE no es la fecha de Lima por la noche."""
+    return ahora.astimezone(zona_horaria()).date()
