@@ -10,9 +10,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
+from app.core.reglas import ContrasenaNueva, Username
 from app.schemas.usuarios import PATRON_LETRAS
-
-PATRON_USERNAME = r"^[a-zA-Z0-9._-]+$"
 
 
 class CrearAsistenteEntrada(BaseModel):
@@ -26,22 +25,8 @@ class CrearAsistenteEntrada(BaseModel):
         str,
         StringConstraints(strip_whitespace=True, min_length=1, pattern=PATRON_LETRAS),
     ]
-    username: (
-        Annotated[
-            str,
-            StringConstraints(
-                strip_whitespace=True, min_length=3, max_length=30, pattern=PATRON_USERNAME
-            ),
-        ]
-        | None
-    ) = None
-    contrasena: (
-        Annotated[
-            str,
-            StringConstraints(min_length=8, max_length=72),
-        ]
-        | None
-    ) = None
+    username: Username | None = None
+    contrasena: ContrasenaNueva | None = None
     activar_ahora: bool = True
 
 
