@@ -23,4 +23,11 @@ describe('fechas del calendario', () => {
     expect(claveFecha(inicioSemana(new Date(2027, 0, 1)))).toBe('2026-12-28')
     expect(fechasVisibles(new Date(2027, 0, 1), 'semana')).toHaveLength(7)
   })
+
+  it('usa el mes completo en la vista de lista', () => {
+    const dias = fechasVisibles(new Date(2026, 9, 20), 'lista')
+    expect(dias).toHaveLength(31)
+    expect(claveFecha(dias[0]!)).toBe('2026-10-01')
+    expect(claveFecha(dias[30]!)).toBe('2026-10-31')
+  })
 })

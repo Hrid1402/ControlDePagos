@@ -41,6 +41,9 @@ onMounted(() => {
 
 const fechas = computed(() => fechasVisibles(fecha.value, vista.value))
 const diasPorFecha = computed(() => new Map(props.dias.map((dia) => [dia.fecha, dia])))
+const fechasLista = computed(() =>
+  fechas.value.filter((dia) => diasPorFecha.value.get(claveFecha(dia))?.deudas.length),
+)
 const diaActivo = computed(() => diasPorFecha.value.get(diaSeleccionado.value))
 const fechaActiva = computed(() => {
   const [anio = 0, mes = 1, dia = 1] = diaSeleccionado.value.split('-').map(Number)
@@ -211,9 +214,9 @@ function moneda(valor: string, codigo: string): string {
             </span>
           </button>
         </div>
-        <div v-else class="lista-fechas">
+        <div v-else-if="fechasLista.length" class="lista-fechas">
           <button
-            v-for="dia in fechas"
+            v-for="dia in fechasLista"
             :key="claveFecha(dia)"
             type="button"
             class="fila-fecha"
@@ -231,6 +234,11 @@ function moneda(valor: string, codigo: string): string {
             </span>
             <i class="pi pi-chevron-right" aria-hidden="true"></i>
           </button>
+        </div>
+        <div v-else class="lista-vacia">
+          <i class="pi pi-calendar" aria-hidden="true"></i>
+          <h3>Sin vencimientos este mes</h3>
+          <p>Cuando haya pagos previstos, aparecerán aquí por fecha.</p>
         </div>
       </div>
 
@@ -702,6 +710,35 @@ select:focus-visible {
 }
 .lista-fechas {
   display: grid;
+}
+.lista-vacia {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 300px;
+  padding: 32px;
+  text-align: center;
+}
+.lista-vacia i {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--deconsta-realce);
+  color: var(--deconsta-primary);
+  font-size: 21px;
+}
+.lista-vacia h3 {
+  margin: 18px 0 0;
+  font-size: var(--texto-base);
+}
+.lista-vacia p {
+  max-width: 32ch;
+  margin: 8px 0 0;
+  color: var(--deconsta-muted);
+  font-size: var(--texto-sm);
+  line-height: 1.55;
 }
 .fila-fecha {
   display: flex;

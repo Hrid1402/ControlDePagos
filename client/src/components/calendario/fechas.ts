@@ -24,6 +24,13 @@ export function inicioSemana(fecha: Date): Date {
 }
 
 export function fechasVisibles(fecha: Date, vista: VistaCalendario): Date[] {
+  if (vista === 'lista') {
+    const ultimoDia = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0).getDate()
+    return Array.from(
+      { length: ultimoDia },
+      (_, indice) => new Date(fecha.getFullYear(), fecha.getMonth(), indice + 1),
+    )
+  }
   if (vista === 'mes') {
     const primerDia = new Date(fecha.getFullYear(), fecha.getMonth(), 1)
     const inicio = inicioSemana(primerDia)
@@ -36,7 +43,7 @@ export function fechasVisibles(fecha: Date, vista: VistaCalendario): Date[] {
 }
 
 export function tituloPeriodo(fecha: Date, vista: VistaCalendario): string {
-  if (vista === 'mes') {
+  if (vista !== 'semana') {
     const texto = new Intl.DateTimeFormat(idioma, { month: 'long', year: 'numeric' }).format(fecha)
     return texto.charAt(0).toUpperCase() + texto.slice(1)
   }
@@ -48,7 +55,7 @@ export function tituloPeriodo(fecha: Date, vista: VistaCalendario): string {
 }
 
 export function moverPeriodo(fecha: Date, vista: VistaCalendario, direccion: number): Date {
-  if (vista !== 'mes') return sumarDias(fecha, direccion * 7)
+  if (vista === 'semana') return sumarDias(fecha, direccion * 7)
   const dia = fecha.getDate()
   const ultimo = new Date(fecha.getFullYear(), fecha.getMonth() + direccion + 1, 0).getDate()
   return new Date(fecha.getFullYear(), fecha.getMonth() + direccion, Math.min(dia, ultimo))
