@@ -134,10 +134,12 @@ def publicar_evento_orden(db: Session, orden: OrdenPago, tipo: TipoEvento) -> No
     """Único punto de publicación de los eventos orden_*. Se llama después de cambiar la orden y
     el evento sale solo si la transacción se confirma.
 
-    - orden_nueva (TASK-63 al crear y reenviar, TASK-64 al reenviar): a la asistente, con la
-      orden completa en datos.orden para mostrarla sin esperar a la API.
-    - orden_cancelada (TASK-63): a la asistente. intento_vigente indica que la deuda sigue en
-      proceso a su nombre: se cierra la pantalla completa, no la ventanilla.
+    - orden_nueva (TASK-63 al crear y reenviar, TASK-64 al reenviar, TASK-14 al traspasarla a
+      otra asistente): a la asistente, con la orden completa en datos.orden para mostrarla sin
+      esperar a la API.
+    - orden_cancelada (TASK-63, y TASK-14 al desactivar la única asistente): a la asistente.
+      intento_vigente indica que la deuda sigue en proceso a su nombre: se cierra la pantalla
+      completa, no la ventanilla.
     - orden_vista, orden_aceptada y orden_rechazada: al gerente, para su lista de órdenes, y a la
       asistente, para que sus otras pestañas cierren la pantalla completa.
 

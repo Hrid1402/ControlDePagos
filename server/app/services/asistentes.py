@@ -1,21 +1,35 @@
-"""Servicio para la creación y gestión de asistentes por parte del gerente (TASK-13).
+"""Servicio para la creación y gestión de asistentes por parte del gerente (TASK-13 y TASK-14).
 
 Gestiona la generación/validación de credenciales, disponibilidad de username,
-y la regla de una sola asistente activa por gerente (TASK-14).
+la regla de una sola asistente activa por gerente y el ciclo de la cuenta: activar,
+desactivar, eliminar y restablecer contraseña.
+
+Toda operación sobre las asistentes bloquea primero la fila del gerente: dos solicitudes
+simultáneas del mismo gerente se hacen en fila y nunca quedan dos cuentas activas. Después se
+bloquean las asistentes y al final sus órdenes, el orden usuario -> orden_pago de
+app/services/ordenes.py.
 """
 
 import re
 import unicodedata
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
+from app.core.eventos import TipoEvento, avisar_cierre_sesion
 from app.core.seguridad import generar_contrasena_segura, hashear_contrasena
-from app.models import Usuario
+from app.core.tiempo import ahora_lima
+from app.models import ActivacionCuenta, OrdenPago, Usuario
 from app.schemas.asistentes import CrearAsistenteEntrada, DisponibilidadUsernameSalida
-from app.services.auditoria import Accion, registrar_auditoria
+from app.services.auditoria import Accion, diferencias, nombre_de, registrar_auditoria
+from app.services.contrasenas import actualizar_contrasena
+from app.services.notificaciones import TipoNotificacion, notificar
+from app.services.ordenes import ESTADOS_PENDIENTES, publicar_evento_orden
 
 
 def normalizar_texto(texto: str) -> str:
@@ -82,8 +96,7 @@ def crear_asistente(
     origen: Origen,
 ) -> tuple[Usuario, str]:
     """Crea una asistente para el gerente, aplicando credenciales y activando según regla."""
-    # Bloquear al gerente para serializar operaciones sobre sus asistentes (concurrencia)
-    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update())
+    bloquear_gerente(db, gerente)
 
     # Determinar el username
     if datos.username:
@@ -174,6 +187,283 @@ def crear_asistente(
             origen=origen,
         )
 
+    db.commit()
+    db.refresh(asistente)
+    return asistente, contrasena_plana
+
+
+# --- Ciclo de la cuenta (TASK-14) ---
+
+AVISO_SIN_ASISTENTE = "No queda ninguna asistente activa: tú harás los pagos."
+
+
+@dataclass(frozen=True)
+class Activacion:
+    activada: Usuario
+    desactivada: Usuario | None = None
+    ordenes_traspasadas: list[OrdenPago] = field(default_factory=list)
+    repetido: bool = False
+
+
+@dataclass(frozen=True)
+class Desactivacion:
+    asistente: Usuario
+    sin_asistente_activa: bool
+    ordenes_canceladas: list[OrdenPago] = field(default_factory=list)
+    repetido: bool = False
+
+
+def bloquear_gerente(db: Session, gerente: Usuario) -> None:
+    """Serializa las operaciones del gerente sobre sus asistentes hasta el commit."""
+    db.execute(select(Usuario.id).where(Usuario.id == gerente.id).with_for_update())
+
+
+def consulta_asistentes(gerente: Usuario) -> Select[Usuario]:
+    """Cuentas de asistente del gerente que no fueron eliminadas."""
+    return select(Usuario).where(
+        Usuario.gerente_id == gerente.id,
+        Usuario.rol == "asistente",
+        Usuario.eliminado_en.is_(None),
+    )
+
+
+def bloquear_asistente_propia(db: Session, gerente: Usuario, asistente_id: uuid.UUID) -> Usuario:
+    """Asistente del gerente bloqueada y releída; si no existe, es ajena o fue eliminada, 404."""
+    asistente = db.scalar(
+        consulta_asistentes(gerente)
+        .where(Usuario.id == asistente_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if asistente is None:
+        raise ErrorApi(404, "NO_ENCONTRADO", "No se encontró el recurso solicitado.")
+    return asistente
+
+
+def bloquear_activa(db: Session, gerente: Usuario) -> Usuario | None:
+    return db.scalar(
+        consulta_asistentes(gerente)
+        .where(Usuario.estado == "activa")
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+def ordenes_sin_atender(db: Session, asistente: Usuario) -> list[OrdenPago]:
+    """Órdenes urgentes que la asistente todavía no aceptó ni rechazó (CA14). Una aceptada ya
+    tiene un intento de pago a su nombre y no se traspasa ni se cancela."""
+    return list(
+        db.scalars(
+            select(OrdenPago)
+            .where(
+                OrdenPago.gerente_id == asistente.gerente_id,
+                OrdenPago.asistente_id == asistente.id,
+                OrdenPago.estado.in_(ESTADOS_PENDIENTES),
+            )
+            .order_by(OrdenPago.creado_en, OrdenPago.id)
+            .with_for_update()
+        )
+    )
+
+
+def registrar_cambio_estado(
+    db: Session,
+    gerente: Usuario,
+    asistente: Usuario,
+    accion: Accion,
+    detalle: dict[str, object],
+    origen: Origen,
+) -> None:
+    """Historial de activaciones del detalle (CA17) y auditoría del gerente."""
+    db.add(
+        ActivacionCuenta(
+            cuenta_id=asistente.id,
+            accion=accion.value.removeprefix("cuenta_"),
+            realizada_por=gerente.id,
+        )
+    )
+    registrar_auditoria(db, gerente, accion, "usuario", asistente.id, detalle, origen=origen)
+
+
+def revocar_sesiones(db: Session, asistente: Usuario) -> None:
+    """Invalida los tokens emitidos y cierra sus WebSocket después del commit (CA13)."""
+    asistente.token_version += 1
+    avisar_cierre_sesion(db, asistente.id)
+
+
+def desactivar_cuenta(
+    db: Session, gerente: Usuario, asistente: Usuario, motivo: str, origen: Origen
+) -> None:
+    asistente.estado = "inactiva"
+    revocar_sesiones(db, asistente)
+    registrar_cambio_estado(
+        db, gerente, asistente, Accion.CUENTA_DESACTIVADA, {"motivo": motivo}, origen
+    )
+    # El índice de activa única se revisa fila por fila: la anterior debe quedar inactiva en la
+    # base antes de activar otra.
+    db.flush()
+
+
+def activar_asistente(
+    db: Session, gerente: Usuario, asistente_id: uuid.UUID, origen: Origen
+) -> Activacion:
+    """Activa la cuenta, desactiva la actual y le traspasa sus órdenes sin atender en una sola
+    transacción (CA10 y CA14). Activar la que ya está activa no cambia nada."""
+    bloquear_gerente(db, gerente)
+    anterior = bloquear_activa(db, gerente)
+    asistente = bloquear_asistente_propia(db, gerente, asistente_id)
+    if asistente.estado == "activa":
+        return Activacion(activada=asistente, repetido=True)
+
+    pendientes: list[OrdenPago] = []
+    if anterior is not None:
+        pendientes = ordenes_sin_atender(db, anterior)
+        desactivar_cuenta(db, gerente, anterior, "reemplazada_por_otra_asistente", origen)
+
+    asistente.estado = "activa"
+    registrar_cambio_estado(
+        db,
+        gerente,
+        asistente,
+        Accion.CUENTA_ACTIVADA,
+        {"reemplaza_a": anterior.id if anterior else None},
+        origen,
+    )
+
+    for orden in pendientes:
+        # La nueva asistente aún no la vio: vuelve a enviada para que TASK-64 la reenvíe.
+        de = orden.asistente_id
+        orden.asistente_id = asistente.id
+        orden.estado = "enviada"
+        orden.vista_en = None
+        registrar_auditoria(
+            db,
+            gerente,
+            Accion.ORDEN_TRASPASADA,
+            "orden_pago",
+            orden.id,
+            {"deuda_id": orden.deuda_id, "de": de, "a": asistente.id},
+            origen=origen,
+        )
+        publicar_evento_orden(db, orden, TipoEvento.ORDEN_NUEVA)
+
+    db.commit()
+    return Activacion(activada=asistente, desactivada=anterior, ordenes_traspasadas=pendientes)
+
+
+def desactivar_asistente(
+    db: Session,
+    gerente: Usuario,
+    asistente_id: uuid.UUID,
+    origen: Origen,
+    ahora: datetime | None = None,
+) -> Desactivacion:
+    """Bloquea el acceso de la cuenta y cierra sus sesiones (CA11 y CA13). Como solo hay una
+    activa, desactivarla deja al gerente sin asistente: sus órdenes sin atender se cancelan y se
+    le avisa (CA12 y CA14). Desactivar una cuenta inactiva no cambia nada."""
+    momento = ahora or ahora_lima()
+    bloquear_gerente(db, gerente)
+    asistente = bloquear_asistente_propia(db, gerente, asistente_id)
+    if asistente.estado != "activa":
+        return Desactivacion(
+            asistente=asistente,
+            sin_asistente_activa=bloquear_activa(db, gerente) is None,
+            repetido=True,
+        )
+
+    pendientes = ordenes_sin_atender(db, asistente)
+    desactivar_cuenta(db, gerente, asistente, "desactivada_por_gerente", origen)
+
+    for orden in pendientes:
+        orden.estado = "cancelada"
+        orden.cancelada_en = momento
+        registrar_auditoria(
+            db,
+            gerente,
+            Accion.ORDEN_CANCELADA,
+            "orden_pago",
+            orden.id,
+            {"deuda_id": orden.deuda_id, "motivo": "sin_asistente_activa"},
+            origen=origen,
+        )
+        publicar_evento_orden(db, orden, TipoEvento.ORDEN_CANCELADA)
+
+    if pendientes:
+        cantidad = len(pendientes)
+        canceladas = (
+            "Se canceló 1 orden urgente"
+            if cantidad == 1
+            else f"Se cancelaron {cantidad} órdenes urgentes"
+        )
+        notificar(
+            db,
+            gerente,
+            TipoNotificacion.ORDEN_URGENTE,
+            "Órdenes canceladas",
+            f"{canceladas} porque desactivaste a {nombre_de(asistente)} y no queda otra "
+            "asistente activa.",
+            urgente=True,
+            clave_evento=f"ordenes_canceladas:{asistente.id}:{asistente.token_version}",
+            ahora=momento,
+        )
+
+    db.commit()
+    return Desactivacion(
+        asistente=asistente, sin_asistente_activa=True, ordenes_canceladas=pendientes
+    )
+
+
+def eliminar_asistente(
+    db: Session,
+    gerente: Usuario,
+    asistente_id: uuid.UUID,
+    origen: Origen,
+    ahora: datetime | None = None,
+) -> None:
+    """Baja lógica de una cuenta inactiva (CA15). La fila se conserva para que el historial y la
+    auditoría sigan mostrando su nombre; el usuario tampoco se libera."""
+    bloquear_gerente(db, gerente)
+    asistente = bloquear_asistente_propia(db, gerente, asistente_id)
+    if asistente.estado == "activa":
+        raise ErrorApi(409, "CUENTA_ACTIVA", "Desactiva la cuenta antes de eliminarla.")
+
+    asistente.eliminado_en = ahora or ahora_lima()
+    registrar_cambio_estado(
+        db,
+        gerente,
+        asistente,
+        Accion.CUENTA_ELIMINADA,
+        {"username": asistente.username, "nombre": nombre_de(asistente)},
+        origen,
+    )
+    db.commit()
+
+
+def restablecer_contrasena_asistente(
+    db: Session, gerente: Usuario, asistente_id: uuid.UUID, origen: Origen
+) -> tuple[Usuario, str]:
+    """Genera una contraseña nueva que se muestra una sola vez y cierra sus sesiones (CA16).
+    Vuelve a ser contraseña inicial y quita el bloqueo por intentos fallidos."""
+    bloquear_gerente(db, gerente)
+    asistente = bloquear_asistente_propia(db, gerente, asistente_id)
+
+    contrasena_plana = generar_contrasena_segura(12)
+    version = asistente.token_version
+    actualizar_contrasena(db, asistente, contrasena_plana)
+    asistente.contrasena_inicial = True
+    asistente.intentos_fallidos = 0
+    asistente.bloqueado_hasta = None
+    avisar_cierre_sesion(db, asistente.id)
+
+    registrar_auditoria(
+        db,
+        gerente,
+        Accion.CONTRASENA_RESTABLECIDA,
+        "usuario",
+        asistente.id,
+        diferencias({"token_version": version}, {"token_version": asistente.token_version}),
+        origen=origen,
+    )
     db.commit()
     db.refresh(asistente)
     return asistente, contrasena_plana

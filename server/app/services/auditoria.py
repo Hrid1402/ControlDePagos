@@ -47,6 +47,8 @@ class Accion(StrEnum):
     ORDEN_VISTA = "orden_vista"
     ORDEN_ACEPTADA = "orden_aceptada"
     ORDEN_RECHAZADA = "orden_rechazada"
+    ORDEN_TRASPASADA = "orden_traspasada"
+    ORDEN_CANCELADA = "orden_cancelada"
     USUARIO_CAMBIADO = "usuario_cambiado"
     CONTRASENA_CAMBIADA = "contrasena_cambiada"
     CATEGORIA_CREADA = "categoria_creada"
