@@ -5,17 +5,19 @@ historial del gerente. Completa test_auditoria.py (servicio) y test_api_auditori
 Excel): aquí se prueba que las rutas reales registran y que el historial no se edita por la API.
 """
 
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.seguridad import crear_token, hashear_contrasena
 from app.main import app
-from app.models import Usuario
+from app.models import Auditoria, Usuario
 from tests.conftest import DosGerentes, nueva_deuda
 
 AGENTE = "Mozilla/5.0 (Linux; Android 14) Chrome/141.0 Mobile Safari/537.36"
@@ -141,3 +143,47 @@ def test_ca02_los_cambios_de_estado_de_una_deuda_se_registran_con_el_anterior_y_
     assert inicio["usuario_id"] == str(equipo.asistente.id)
     assert inicio["detalle"]["estado_anterior"] == "pendiente"
     assert cancelacion["detalle"]["estado_nuevo"] == "pendiente"
+
+
+@pytest.mark.parametrize("metodo", ["POST", "PUT", "PATCH", "DELETE"])
+def test_ca04_la_api_no_permite_crear_editar_ni_borrar_registros(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes, metodo: str
+) -> None:
+    gerente = dos_gerentes.uno.gerente
+    cliente.post(
+        "/api/v1/auth/login",
+        json={"username": gerente.username, "contrasena": "no-es-esta"},
+    )
+    registro = db.scalars(select(Auditoria).where(Auditoria.gerente_id == gerente.id)).one()
+    antes = (registro.accion, registro.detalle, registro.usuario_nombre)
+    total = db.scalar(select(func.count()).select_from(Auditoria))
+
+    for ruta in ("/api/v1/auditoria", f"/api/v1/auditoria/{registro.id}"):
+        r = cliente.request(
+            metodo,
+            ruta,
+            json={"accion": "login_exitoso", "usuario_nombre": "Otra persona"},
+            headers=cabecera(gerente),
+        )
+        assert r.status_code in (404, 405), (ruta, r.status_code)
+
+    db.refresh(registro)
+    assert (registro.accion, registro.detalle, registro.usuario_nombre) == antes
+    assert db.scalar(select(func.count()).select_from(Auditoria)) == total
+
+
+def test_ca06_solo_el_gerente_ve_el_historial_aunque_la_accion_sea_de_su_asistente(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    asistente = con_contrasena(db, equipo.asistente)
+    cliente.post(
+        "/api/v1/auth/login", json={"username": asistente.username, "contrasena": CONTRASENA}
+    )
+
+    for ruta in ("/api/v1/auditoria", "/api/v1/auditoria/exportar"):
+        r = cliente.get(ruta, params={"usuario": str(asistente.id)}, headers=cabecera(asistente))
+        assert (r.status_code, r.json()["code"]) == (403, "SIN_PERMISO")
+    assert historial(cliente, equipo.gerente, usuario=str(asistente.id))
+    assert historial(cliente, dos_gerentes.dos.gerente, usuario=str(asistente.id)) == []
+    assert historial(cliente, equipo.gerente, usuario=str(uuid.uuid4())) == []
