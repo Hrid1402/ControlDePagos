@@ -42,6 +42,7 @@ class TipoEvento(StrEnum):
     NOTIFICACION = "notificacion"
     SESION_CERRADA = "sesion_cerrada"
     RESINCRONIZAR = "resincronizar"
+    PAGO_CANCELADO = "pago_cancelado"
 
 
 @dataclass(frozen=True)

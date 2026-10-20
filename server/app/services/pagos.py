@@ -26,11 +26,18 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen, gerente_de
 from app.core.errores import ErrorApi
+from app.core.eventos import Evento, TipoEvento, publicar_tras_commit
 from app.core.tiempo import ahora_lima, zona_horaria
 from app.models import Deuda, Limite, OrdenPago, SolicitudAprobacion, Usuario
 from app.services.auditoria import Accion, nombre_de, registrar_auditoria
 from app.services.notificaciones import TipoNotificacion, notificar
-from app.services.saldo import MONEDA_LIMITE, consumo_mes_pen, saldo_de
+from app.services.saldo import (
+    MONEDA_LIMITE,
+    aplicado_de,
+    consumo_mes_pen,
+    saldo_de,
+    tiene_comprobante_activo,
+)
 
 ESTADOS_INICIABLES = ("pendiente", "pagada_parcial")
 
@@ -71,6 +78,14 @@ class AutorizacionOrden:
 
     orden: OrdenPago
     moneda: str
+
+
+@dataclass(frozen=True)
+class AccionesPago:
+    """Acciones de pago que el detalle de la deuda (H17) ofrece al usuario."""
+
+    iniciar: bool
+    cancelar_inicio: bool
 
 
 @dataclass(frozen=True)
@@ -292,3 +307,82 @@ def iniciar_pago(
         db, usuario, Accion.PAGO_INICIADO, "deuda", deuda.id, detalle, origen=origen
     )
     return InicioPago(ResultadoInicio.INICIADO, deuda, saldo)
+
+
+def cancelar_inicio(
+    db: Session, usuario: Usuario, deuda_id: uuid.UUID, motivo: str | None, *, origen: Origen
+) -> Deuda:
+    """Deshace un intento que no llegó a pagarse y libera su reserva.
+
+    Solo el dueño del intento o el gerente, y solo si no se declaró el pago ni hay un comprobante
+    que todavía pueda validarse. Nada lo cancela por tiempo: un pago que pudo hacerse no se libera
+    solo. El gerente resuelve un intento abandonado de otra persona indicando el motivo.
+    """
+    gerente_id = gerente_de(usuario)
+    if gerente_id is None:
+        raise sin_permiso()
+    deuda = bloquear_deuda(db, deuda_id, gerente_id)
+    if deuda.estado != "en_proceso":
+        raise ErrorApi(409, "SIN_INTENTO", "La deuda no tiene un pago en curso que cancelar.")
+    dueno_id = deuda.pago_iniciado_por
+    es_dueno = dueno_id == usuario.id
+    if not es_dueno and usuario.rol != "gerente":
+        raise sin_permiso()
+    motivo = (motivo or "").strip() or None
+    if not es_dueno and motivo is None:
+        raise ErrorApi(
+            422,
+            "VALIDACION",
+            "Indica el motivo para cancelar el pago que inició otra persona.",
+            "motivo",
+        )
+    if deuda.pago_realizado:
+        raise ErrorApi(
+            409, "PAGO_DECLARADO", "El pago ya se declaró realizado; adjunta su comprobante."
+        )
+    if tiene_comprobante_activo(db, deuda.id):
+        raise ErrorApi(
+            409, "COMPROBANTE_ACTIVO", "La deuda tiene un comprobante en proceso de validación."
+        )
+
+    iniciado_en = deuda.pago_iniciado_en
+    deuda.estado = "pagada_parcial" if aplicado_de(db, deuda.id) > 0 else "pendiente"
+    deuda.pago_iniciado_por = None
+    deuda.pago_iniciado_en = None
+    deuda.recordatorios_enviados = 0
+    registrar_auditoria(
+        db,
+        usuario,
+        Accion.PAGO_INICIO_CANCELADO,
+        "deuda",
+        deuda.id,
+        {
+            "estado_nuevo": deuda.estado,
+            "iniciado_por": dueno_id,
+            "iniciado_en": iniciado_en,
+            "motivo": motivo,
+        },
+        origen=origen,
+    )
+    if dueno_id is not None and not es_dueno:
+        # La ventanilla del dueño se cierra: su intento ya no está vigente.
+        datos = {"deuda_id": str(deuda.id), "estado": deuda.estado}
+        publicar_tras_commit(db, dueno_id, Evento(TipoEvento.PAGO_CANCELADO, datos))
+    return deuda
+
+
+def acciones_de_pago(db: Session, deuda: Deuda, usuario: Usuario) -> AccionesPago:
+    """Qué acciones de pago tiene el usuario sobre la deuda, con las mismas reglas del servicio.
+    No evalúa el límite: superarlo no impide iniciar, lleva a pedir la aprobación."""
+    if deuda.gerente_id != gerente_de(usuario):
+        return AccionesPago(iniciar=False, cancelar_inicio=False)
+    puede_cancelar = (
+        deuda.estado == "en_proceso"
+        and (deuda.pago_iniciado_por == usuario.id or usuario.rol == "gerente")
+        and not deuda.pago_realizado
+        and not tiene_comprobante_activo(db, deuda.id)
+    )
+    return AccionesPago(
+        iniciar=deuda.estado in ESTADOS_INICIABLES and saldo_de(db, deuda) > 0,
+        cancelar_inicio=puede_cancelar,
+    )
