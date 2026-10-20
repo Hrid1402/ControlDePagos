@@ -200,6 +200,6 @@ describe('espacios y avisos de sesión', () => {
     await router.push('/login?motivo=inactividad')
     await flushPromises()
     expect(wrapper.text()).toContain('30 minutos sin actividad')
-    expect(wrapper.get('h1').text()).toBe('Pronto estaremos disponibles.')
+    expect(wrapper.get('h1').text()).toBe('Todo en su lugar.')
   })
 })
