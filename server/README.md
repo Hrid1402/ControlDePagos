@@ -106,3 +106,124 @@ el lector omite el hash vigente y hashes repetidos para no reducir la ventana de
 
 No requiere migración ni limpieza de datos existentes. El cambio propio conserva la sesión
 actual mediante un token renovado; el restablecimiento exige iniciar sesión otra vez.
+
+## Tareas en segundo plano: Celery y Beat
+
+El worker de Celery ejecuta las tareas en segundo plano y Beat las programa. Los dos usan el
+Redis de `REDIS_URL` como broker y backend de resultados, y abren sus sesiones de base con la
+misma configuración que la API (`DATABASE_URL`). No necesitan variables de entorno nuevas.
+
+| Archivo | Contenido |
+|---|---|
+| `app/workers/celery_app.py` | App de Celery y su configuración |
+| `app/workers/horarios.py` | Horarios de Beat |
+| `app/workers/base.py` | Base de las tareas: reintentos, sesión propia y bloqueo |
+| `app/workers/encolar.py` | Encolar una tarea solo si la transacción se confirma |
+| `app/workers/latido.py` | Latido: job de ejemplo que comprueba que todo responde |
+
+### Arranque local
+
+Requiere los servicios levantados (`pnpm services:up`) y la base migrada.
+
+```bash
+pnpm dev             # client, server, worker y beat
+pnpm worker:server   # solo el worker, en otra terminal
+pnpm beat:server     # solo Beat, en otra terminal
+```
+
+El worker escucha la cola `general` con dos procesos y se reinicia solo cuando cambia un archivo
+de `server/app`. Beat no se reinicia solo: al cambiar `horarios.py`, detenlo y arráncalo otra
+vez. Beat guarda su estado en `server/celerybeat-schedule*`, que no se sube al repositorio.
+
+Para comprobar que funcionan, espera a que corra el latido (cada 5 minutos, a las :00, :05,
+:10...) y lee su registro:
+
+```bash
+docker compose exec redis redis-cli GET control_pagos:latido
+```
+
+Devuelve la hora de Lima de la última ejecución y la hora de la base. La clave vence a los
+15 minutos: si no existe, el worker o Beat están detenidos.
+
+### Configuración
+
+| Opción | Valor | Por qué |
+|---|---|---|
+| Formato de los mensajes | Solo JSON | Los argumentos son ids como texto, nunca objetos del ORM |
+| Zona de Beat | `TIMEZONE` (America/Lima) | Las horas de crontab se leen en Lima; Celery trabaja en UTC |
+| Confirmación del mensaje | Al terminar la tarea, uno a la vez por proceso | Un mensaje no se pierde si el worker se detiene antes de ejecutarlo |
+| Límite de tiempo | 60 s aviso y 90 s corte | Cada tarea puede fijar los suyos (`soft_time_limit`, `time_limit`) |
+| Reintentos | Hasta 3, esperando 5 s, 10 s, 20 s... (máximo 300 s, con variación) | Solo ante fallos transitorios de la base o de Redis; un error de lógica no se reintenta |
+| Resultados | Se ignoran salvo que se pidan | El estado vive en la base y llega por la API y el WebSocket |
+| Encargo programado (`countdown`, `eta`) | Menos de una hora | Pasada una hora sin confirmarse, Redis lo entrega otra vez |
+
+Si un proceso del worker muere a mitad de una tarea, esta no se reencola sola: la recupera la
+revisión programada que le corresponde. Por eso los plazos (por ejemplo, avisar a los 10 minutos
+o a las 4 horas) se implementan con una revisión periódica de Beat y no con `countdown`.
+
+### Agregar una tarea programada
+
+1. Crear la tarea en un módulo de `app/workers/` con `@celery_app.task`. Toda tarea usa la base
+   común (`TareaBase`) sin declararla.
+2. Agregar el módulo al `include` de `app/workers/celery_app.py`.
+3. Agregar su entrada en `HORARIOS` (`app/workers/horarios.py`), con `expires` menor o igual a su
+   intervalo para que los encargos atrasados no se acumulen:
+
+```python
+"recordatorios_comprobante": {
+    "task": "app.workers.recordatorios.revisar_comprobantes",
+    "schedule": crontab(minute="*/15"),  # cada 15 minutos; crontab(hour=18, minute=0) a las 18:00
+    "options": {"expires": 14 * 60},
+},
+```
+
+Una prueba de `tests/test_workers_config.py` falla si una entrada apunta a una tarea que no está
+registrada o no tiene `expires`. Beat corre en una sola instancia.
+
+### Patrón de un job
+
+Cada ejecución comprueba el estado actual y es idempotente: correr el job dos veces, o volver a
+recibir el mismo mensaje, no duplica efectos.
+
+```python
+@celery_app.task(soft_time_limit=50, time_limit=60)
+def revisar_comprobantes() -> None:
+    with un_solo_a_la_vez("revisar_comprobantes") as tomado:
+        if not tomado:
+            return  # otra ejecución sigue en curso
+        with sesion_de_trabajo() as db:  # sesión propia; confirma al salir, deshace si falla
+            for deuda in candidatas(db):  # elegidas por su estado actual
+                # Se vuelve a comprobar el estado dentro de la transacción y el aviso usa
+                # clave_evento: repetirlo no crea otra notificación.
+                notificar(db, ..., clave_evento=f"recordatorio:{deuda.id}:{ciclo}")
+```
+
+- `un_solo_a_la_vez` toma un bloqueo en Redis que vence solo a los 120 s si el worker muere.
+- `sesion_de_trabajo` confirma la transacción al salir sin errores y la deshace si hay una
+  excepción. Los eventos (`publicar_tras_commit`, `notificar`) y las tareas encoladas con
+  `encolar_tras_commit` salen solo después del commit.
+- La idempotencia la garantiza la base: condición de estado al actualizar, unicidades y
+  `clave_evento`. El bloqueo solo evita trabajo simultáneo.
+
+### Encolar desde un servicio
+
+Un servicio que necesita trabajo en segundo plano lo encola en su misma sesión:
+
+```python
+encolar_tras_commit(db, procesar_comprobante.s(str(comprobante.id)))
+```
+
+La tarea se envía solo si la transacción se confirma; si se deshace, no se encola nada. Si Redis
+no responde al encolar, el commit se conserva y el fallo queda en el log, sin los argumentos de la
+tarea. Por eso el trabajo encolado así deja en la base un estado (por ejemplo, un comprobante en
+`procesando`) que una revisión de Beat recorre para volver a encolarlo, y la tarea es idempotente
+ante ese segundo envío.
+
+### Pruebas
+
+- Las tareas se prueban con `tarea.apply()`, que las ejecuta en el mismo proceso, con sus
+  reintentos y sin esperar entre ellos.
+- Para que un job use la sesión de la prueba, se reemplaza `app.workers.base.fabrica_sesiones`.
+- `tests/test_latido.py` arranca un worker real dentro de la prueba, sobre una cola con nombre
+  único que no consume el worker local. Al terminar borra la cola, su registro y las claves de
+  la prueba en Redis.
