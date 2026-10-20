@@ -8,22 +8,25 @@ CA11: Cada usuario solo ve y edita sus propios datos.
 
 from fastapi import APIRouter
 
+from app.core import politica
 from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
 from app.schemas.usuarios import (
     AceptarPoliticaEntrada,
     ActualizarPerfilEntrada,
     PerfilSalida,
+    PoliticaSalida,
+    SeccionPolitica,
 )
-from app.services.usuarios import aceptar_politica, actualizar_perfil
+from app.services.usuarios import aceptar_politica, actualizar_perfil, perfil_de
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
 
 @router.get("/perfil", response_model=PerfilSalida)
 @router.get("/me", response_model=PerfilSalida, include_in_schema=False)
-def obtener_perfil(usuario: UsuarioActual) -> PerfilSalida:
+def obtener_perfil(usuario: UsuarioActual, db: SesionDb) -> PerfilSalida:
     """Devuelve los datos del perfil del usuario autenticado (CA09, CA11)."""
-    return PerfilSalida.model_validate(usuario)
+    return perfil_de(db, usuario)
 
 
 @router.put("/perfil", response_model=PerfilSalida)
@@ -36,7 +39,20 @@ def editar_perfil(
 ) -> PerfilSalida:
     """Actualiza datos personales respetando validaciones de formato e integridad."""
     usuario_actualizado = actualizar_perfil(db, usuario, datos, origen)
-    return PerfilSalida.model_validate(usuario_actualizado)
+    return perfil_de(db, usuario_actualizado)
+
+
+@router.get("/politica", response_model=PoliticaSalida)
+def obtener_politica(_usuario: UsuarioActual) -> PoliticaSalida:
+    """Política de privacidad vigente, con su versión (CA10)."""
+    return PoliticaSalida(
+        version=politica.VERSION,
+        vigente_desde=politica.VIGENTE_DESDE,
+        secciones=[
+            SeccionPolitica(titulo=s.titulo, parrafos=list(s.parrafos))
+            for s in politica.secciones()
+        ],
+    )
 
 
 @router.post("/politica", response_model=PerfilSalida)
@@ -48,4 +64,4 @@ def registrar_politica(
 ) -> PerfilSalida:
     """Registra la aceptación de la versión de política de privacidad."""
     usuario_actualizado = aceptar_politica(db, usuario, datos.version, origen)
-    return PerfilSalida.model_validate(usuario_actualizado)
+    return perfil_de(db, usuario_actualizado)

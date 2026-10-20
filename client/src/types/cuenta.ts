@@ -24,13 +24,27 @@ export interface PerfilCuenta {
   celular: string | null
   politica_version: string | null
   politica_aceptada_en: string | null
-  /** Aún no los envía la API (brechas de TASK-7 y TASK-9); la pantalla los usa en cuanto lleguen. */
-  cambios_restantes?: number
-  contrasena_inicial?: boolean
+  cambios_restantes: number
+  contrasena_inicial: boolean
+  /** Versión que rige: si no coincide con politica_version, falta aceptarla (CA10). */
+  politica_vigente: string
 }
 
-/** Señales que la API todavía no expone (brechas de TASK-7 y TASK-9). null mientras falten:
- *  la pantalla no las calcula ni las inventa. */
+/** Respuesta de GET /usuarios/politica (app/core/politica.py en el server). */
+export interface PoliticaPrivacidad {
+  version: string
+  vigente_desde: string
+  secciones: { titulo: string; parrafos: string[] }[]
+}
+
+export interface UsuarioCambiado {
+  username: string
+  cambios_restantes: number
+  aviso: string
+}
+
+/** Señales del perfil que la pantalla muestra. null si no se conocen: no se calculan en el
+ *  cliente ni se inventan. */
 export interface SenalesCuenta {
   cambiosRestantes: number | null
   contrasenaInicial: boolean | null

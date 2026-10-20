@@ -14,6 +14,9 @@ export interface OpcionesFormulario {
   valoresIniciales: Record<string, unknown>
   guardar: (valores: Record<string, unknown>) => Promise<unknown>
   mensajeExito?: string
+  /** Tras guardar vuelve a los valores iniciales en vez de conservar lo enviado: para datos que
+   *  no deben quedar en pantalla, como contraseñas. */
+  limpiarAlGuardar?: boolean
 }
 
 export function useFormulario(opciones: OpcionesFormulario) {
@@ -36,7 +39,8 @@ export function useFormulario(opciones: OpcionesFormulario) {
     aviso.value = ''
     try {
       await opciones.guardar(valores)
-      formulario.resetForm({ values: { ...valores } })
+      if (opciones.limpiarAlGuardar) formulario.resetForm()
+      else formulario.resetForm({ values: { ...valores } })
       toast.add({
         severity: 'success',
         summary: 'Guardado',

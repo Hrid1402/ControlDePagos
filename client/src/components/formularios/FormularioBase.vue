@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useFormulario, type OpcionesFormulario } from '@/composables/useFormulario'
@@ -14,10 +15,30 @@ const props = defineProps<
 >()
 const { online, aviso, puedeGuardar, isSubmitting, enviar, meta, values, resetForm } =
   useFormulario(props)
+
+// Mientras se guarda, el botón se desactiva y el navegador suelta el foco. Al terminar vuelve al
+// botón que envió o, si sigue desactivado porque ya no hay cambios (RG05), al formulario: quien
+// usa teclado o lector de pantalla sigue donde estaba.
+const formulario = ref<HTMLFormElement>()
+async function enviarConservandoFoco(event: Event) {
+  const boton = (event as SubmitEvent).submitter
+  await enviar(event)
+  await nextTick()
+  if (document.activeElement !== document.body) return
+  if (boton instanceof HTMLButtonElement && !boton.disabled) boton.focus()
+  else formulario.value?.focus()
+}
 </script>
 
 <template>
-  <form class="formulario-base" novalidate :aria-busy="isSubmitting" @submit="enviar">
+  <form
+    ref="formulario"
+    class="formulario-base"
+    tabindex="-1"
+    novalidate
+    :aria-busy="isSubmitting"
+    @submit="enviarConservandoFoco"
+  >
     <Message v-if="!online" severity="warn" :closable="false">
       No tienes conexión. Puedes seguir editando; conservaremos lo escrito mientras esta página esté
       abierta.
@@ -46,6 +67,7 @@ const { online, aviso, puedeGuardar, isSubmitting, enviar, meta, values, resetFo
 
 <style scoped>
 .formulario-base {
+  outline: none;
   display: grid;
   gap: 24px;
   width: 100%;

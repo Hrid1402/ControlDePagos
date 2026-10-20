@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.politica import VERSION
 from app.core.seguridad import crear_token
 from app.main import app
 from app.models import Auditoria, Usuario
@@ -293,12 +294,12 @@ def test_aceptacion_de_politica_de_privacidad(
     gerente = dos_gerentes.uno.gerente
     r = cliente.post(
         POLITICA_URL,
-        json={"version": "2.0"},
+        json={"version": VERSION},
         headers=auth_headers(gerente),
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["politica_version"] == "2.0"
+    assert data["politica_version"] == VERSION
     assert data["politica_aceptada_en"] is not None
 
     # Verificar registro en auditoría
@@ -311,7 +312,7 @@ def test_aceptacion_de_politica_de_privacidad(
         .order_by(Auditoria.creado_en.desc())
     )
     assert evento is not None
-    assert evento.detalle == {"version": "2.0"}
+    assert evento.detalle == {"version": VERSION}
 
 
 def test_auditoria_al_actualizar_perfil(

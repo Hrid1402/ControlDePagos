@@ -6,12 +6,14 @@ import ResumenCuenta from '@/components/cuenta/ResumenCuenta.vue'
 import SeccionDatos from '@/components/cuenta/SeccionDatos.vue'
 import SeccionUsuario from '@/components/cuenta/SeccionUsuario.vue'
 import SeccionContrasena from '@/components/cuenta/SeccionContrasena.vue'
-import { obtenerPerfil } from '@/api/acceso'
+import { actualizarPerfil, cambiarContrasena, cambiarUsuario, obtenerPerfil } from '@/api/acceso'
+import { useSesionStore } from '@/stores/sesion'
 import type { PerfilCuenta, SenalesCuenta } from '@/types/cuenta'
 
-// Diseño de Mi cuenta (TASK-6, H02). Lee el perfil real; guardar cada sección se conecta en
-// TASK-9, así que por ahora ningún envío simula un cambio guardado.
+// Mi cuenta (H02): diseño de TASK-6 conectado a la API en TASK-9. Cada sección guarda por su
+// cuenta y la pantalla se reconcilia con lo que responde el servidor.
 const route = useRoute()
+const sesion = useSesionStore()
 const perfil = ref<PerfilCuenta | null>(null)
 const estado = ref<'cargando' | 'lista' | 'error'>('cargando')
 
@@ -26,8 +28,41 @@ async function cargar() {
 }
 onMounted(cargar)
 
-async function sinConectar(): Promise<never> {
-  throw { detail: 'Todavía no podemos guardar este cambio. Lo que escribiste sigue aquí.' }
+async function guardarDatos(valores: Record<string, unknown>) {
+  const actualizado = await actualizarPerfil({
+    ...valores,
+    // El servidor no admite el texto vacío: sin documento se envía null.
+    tipo_documento: valores.tipo_documento || null,
+    numero_documento: valores.numero_documento || null,
+  })
+  perfil.value = actualizado
+  // El nombre que muestra el menú de la cuenta sale de la sesión.
+  if (sesion.token && sesion.usuario)
+    sesion.iniciar(sesion.token, {
+      ...sesion.usuario,
+      nombre: [actualizado.nombres, actualizado.apellidos].filter(Boolean).join(' '),
+    })
+}
+
+async function guardarUsuario(valores: Record<string, unknown>) {
+  const cambio = await cambiarUsuario(String(valores.username).trim())
+  if (perfil.value)
+    perfil.value = {
+      ...perfil.value,
+      username: cambio.username,
+      cambios_restantes: cambio.cambios_restantes,
+    }
+}
+
+// CA17: el servidor revoca todas las sesiones y devuelve un token nuevo; reemplazarlo en el mismo
+// paso conserva esta sesión abierta.
+async function guardarContrasena(valores: Record<string, unknown>) {
+  const nueva = await cambiarContrasena(
+    String(valores.contrasena_actual),
+    String(valores.contrasena_nueva),
+  )
+  sesion.iniciar(nueva.token, nueva.usuario)
+  if (perfil.value) perfil.value = { ...perfil.value, contrasena_inicial: false }
 }
 
 // Solo en desarrollo, /…/cuenta?revision=1 fuerza los estados del diseño sobre el perfil real,
@@ -85,20 +120,20 @@ const senales = computed<SenalesCuenta>(() => {
         <SeccionDatos
           :key="String(revision.incompleto)"
           :perfil="perfilVisible"
-          :guardar="sinConectar"
+          :guardar="guardarDatos"
         />
         <SeccionUsuario
           :username="perfilVisible.username"
           :cambios-restantes="senales.cambiosRestantes"
-          :guardar="sinConectar"
+          :guardar="guardarUsuario"
         />
-        <SeccionContrasena :guardar="sinConectar" />
+        <SeccionContrasena :guardar="guardarContrasena" />
       </div>
     </div>
 
     <details v-if="revisando" class="revision">
       <summary>Revisar estados del diseño</summary>
-      <p>Solo en desarrollo. Cambia lo que se muestra; no guarda nada.</p>
+      <p>Solo en desarrollo. Cambia lo que se muestra; guardar sí usa la API.</p>
       <label>
         Pantalla
         <select v-model="revision.estado">

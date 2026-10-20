@@ -34,6 +34,7 @@ function evaluar(valor: unknown) {
       :guardar="guardar"
       texto-boton="Cambiar contraseña"
       mensaje-exito="Contraseña cambiada. Cerramos tus demás sesiones."
+      limpiar-al-guardar
     >
       <template #default="{ valores }">
         <div class="composicion">

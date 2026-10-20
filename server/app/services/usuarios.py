@@ -9,11 +9,34 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core import politica
 from app.core.dependencias import Origen
 from app.core.errores import ErrorApi
 from app.models import Usuario
-from app.schemas.usuarios import ActualizarPerfilEntrada
+from app.schemas.usuarios import ActualizarPerfilEntrada, PerfilSalida
 from app.services.auditoria import Accion, diferencias, registrar_auditoria
+from app.services.cuenta import cambios_restantes
+
+
+def perfil_de(db: Session, usuario: Usuario) -> PerfilSalida:
+    """Perfil con los datos que Mi cuenta necesita además de la fila: cambios de usuario que
+    quedan en el mes (CA07), si usa la contraseña inicial (CA18) y la política vigente (CA10)."""
+    return PerfilSalida(
+        id=usuario.id,
+        username=usuario.username,
+        rol=usuario.rol,
+        nombres=usuario.nombres,
+        apellidos=usuario.apellidos,
+        celular=usuario.celular,
+        correo=usuario.correo,
+        tipo_documento=usuario.tipo_documento,
+        numero_documento=usuario.numero_documento,
+        politica_version=usuario.politica_version,
+        politica_aceptada_en=usuario.politica_aceptada_en,
+        cambios_restantes=cambios_restantes(db, usuario),
+        contrasena_inicial=usuario.contrasena_inicial,
+        politica_vigente=politica.VERSION,
+    )
 
 
 def actualizar_perfil(
@@ -113,7 +136,15 @@ def aceptar_politica(
     version: str,
     origen: Origen,
 ) -> Usuario:
-    """Registra la lectura y aceptación de la política de privacidad."""
+    """Registra la aceptación de la política vigente (CA10). Aceptar otra versión es un 409: el
+    usuario vio un texto que ya no rige y debe leer el vigente."""
+    if version != politica.VERSION:
+        raise ErrorApi(
+            409,
+            "POLITICA_DESACTUALIZADA",
+            "La política de privacidad cambió. Lee la versión vigente para aceptarla.",
+            "version",
+        )
     usuario.politica_version = version
     usuario.politica_aceptada_en = datetime.now(UTC)
 

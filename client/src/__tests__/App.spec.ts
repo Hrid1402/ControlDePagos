@@ -132,9 +132,12 @@ describe('ingreso conectado a la API', () => {
     await escribir(pagina, { username: '  Ana.Paz ', contrasena: CLAVE })
     await enviar(pagina)
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe(ruta))
-    expect(peticiones).toEqual([
-      { url: '/auth/login', cuerpo: { username: 'Ana.Paz', contrasena: CLAVE } },
-    ])
+    expect(peticiones[0]).toEqual({
+      url: '/auth/login',
+      cuerpo: { username: 'Ana.Paz', contrasena: CLAVE },
+    })
+    // Después solo se lee el perfil, para saber si falta aceptar la política (H02 CA10).
+    expect(peticiones.slice(1).map((p) => p.url)).toEqual(['/usuarios/perfil'])
     expect(useSesionStore().token).toBe(token)
     expect(JSON.parse(localStorage.getItem(CLAVE_SESION) ?? '{}').token).toBe(token)
     expect(almacenado()).not.toContain(CLAVE)
