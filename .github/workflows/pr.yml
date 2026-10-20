@@ -137,6 +137,7 @@ jobs:
             const mock = /\b(mocks?|fake|dummy|faker|lorem)\b/i;
             const depuracion = /\b(console\.(log|debug)|debugger)\b/;
             for (const a of archivos) {
+              if (a.filename.startsWith('docs/') && a.status !== 'removed') errores.push(`No se permite subir ${a.filename}; los diseños se mantienen en Notion.`);
               if (rutasIA.test(a.filename)) errores.push(`No se permite el archivo ${a.filename}.`);
               if (/(^|\/)\.env($|\.)/.test(a.filename) && !a.filename.endsWith('.env.example')) errores.push(`No se permite subir ${a.filename}.`);
               if (a.filename.startsWith('.github/')) continue;
