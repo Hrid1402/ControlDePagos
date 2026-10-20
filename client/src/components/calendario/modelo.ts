@@ -2,6 +2,7 @@ export type VistaCalendario = 'mes' | 'semana' | 'lista'
 
 export interface VencimientoCalendario {
   id: string
+  servicio_id: string
   nombre: string
   estado: string
   monto: string | null

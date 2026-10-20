@@ -33,6 +33,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Calendario',
       descripcion: 'Los vencimientos del mes, por día, semana o en lista.',
       principal: true,
+      pagina: () => import('@/pages/CalendarioPage.vue'),
     },
     {
       clave: 'ordenes',
@@ -84,6 +85,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Calendario',
       descripcion: 'Los vencimientos del mes, por día, semana o en lista.',
       principal: true,
+      pagina: () => import('@/pages/CalendarioPage.vue'),
     },
     {
       clave: 'ruta',

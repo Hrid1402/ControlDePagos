@@ -66,7 +66,13 @@ function deconstaMetadata(): Plugin {
 export default defineConfig({
   plugins: [vue(), vueDevTools(), deconstaMetadata()],
   server: {
-    proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true, ws: true } },
+    proxy: {
+      '/api': {
+        target: process.env.CALENDARIO_API_PROXY ?? 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
   resolve: {
     alias: {

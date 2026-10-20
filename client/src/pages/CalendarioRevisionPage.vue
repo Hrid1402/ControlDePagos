@@ -26,7 +26,7 @@ const estado = ref<'lista' | 'cargando' | 'error'>('lista')
         <option value="cargando">Cargando</option>
         <option value="error">Error de conexión</option>
       </select>
-      <p>Esta ruta solo existe en desarrollo. Los datos se conectan en TASK-59.</p>
+      <p>Esta ruta permite revisar estados visuales sin iniciar sesión.</p>
     </div>
   </div>
 </template>
