@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.dependencias import Origen
@@ -168,3 +169,59 @@ def test_ca08_las_deudas_pendientes_de_un_servicio_de_baja_se_siguen_pagando(
     assert (baja.status_code, baja.json()["deudas_pendientes"]) == (200, 1)
     assert inicio.resultado == ResultadoInicio.INICIADO
     assert pendiente.estado == "en_proceso"
+
+
+def test_ca09_la_asistente_registra_y_edita_en_cualquier_categoria_pero_no_da_de_baja(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    asistente = cabecera(equipo.asistente)
+    registrados = [
+        creado(cliente, equipo.asistente, datos(nueva_categoria(db, equipo.gerente, tipo)))
+        for tipo in ("servicio_variable", "monto_fijo", "tarjeta", "prestamo")
+    ]
+    primero = registrados[0]
+
+    editado = cliente.put(
+        f"{RUTA}/{primero['id']}",
+        json=datos(nueva_categoria(db, equipo.gerente, "tarjeta"), alias="Visa"),
+        headers=asistente,
+    )
+    baja = cliente.post(f"{RUTA}/{primero['id']}/baja", headers=asistente)
+
+    assert {r["creado_por"] for r in registrados} == {str(equipo.asistente.id)}
+    assert (editado.status_code, editado.json()["alias"]) == (200, "Visa")
+    assert error(baja)[:2] == (403, "SIN_PERMISO")
+    assert db.get_one(Servicio, uuid.UUID(primero["id"])).estado == "activo"
+
+
+def test_el_ciclo_completo_queda_en_el_historial_del_gerente(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    categoria = nueva_categoria(db, equipo.gerente)
+    servicio = creado(cliente, equipo.asistente, datos(categoria, codigo_suministro="C-1"))
+    ruta = f"{RUTA}/{servicio['id']}"
+    cliente.put(
+        ruta, json=datos(categoria, codigo_suministro="C-2"), headers=cabecera(equipo.asistente)
+    )
+    cliente.post(f"{ruta}/baja", headers=cabecera(equipo.gerente))
+    cliente.post(f"{ruta}/reactivar", headers=cabecera(equipo.gerente))
+
+    historial = cliente.get(
+        "/api/v1/auditoria", params={"size": 50}, headers=cabecera(equipo.gerente)
+    ).json()["items"]
+    propios = [r for r in reversed(historial) if r["entidad_id"] == servicio["id"]]
+
+    assert [(r["accion"], r["usuario_id"]) for r in propios] == [
+        ("servicio_creado", str(equipo.asistente.id)),
+        ("servicio_actualizado", str(equipo.asistente.id)),
+        ("servicio_dado_de_baja", str(equipo.gerente.id)),
+        ("servicio_reactivado", str(equipo.gerente.id)),
+    ]
+    assert propios[2]["detalle"] == {"recurrencias_desactivadas": 0, "deudas_pendientes": 0}
+    otro = cliente.get("/api/v1/auditoria", headers=cabecera(dos_gerentes.dos.gerente)).json()
+    assert servicio["id"] not in {r["entidad_id"] for r in otro["items"]}
+    assert db.scalar(select(Servicio.estado).where(Servicio.id == uuid.UUID(servicio["id"]))) == (
+        "activo"
+    )
