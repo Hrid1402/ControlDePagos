@@ -127,6 +127,11 @@ export const ACCIONES: Record<string, Accion> = {
     frase: 'canceló un pago en curso',
     etiqueta: 'Pago cancelado',
   },
+  pago_declarado: {
+    grupo: 'pagos',
+    frase: 'marcó un pago como hecho en la ruta',
+    etiqueta: 'Pago declarado',
+  },
   aprobacion_solicitada: {
     grupo: 'pagos',
     frase: 'pidió aprobar un pago',
