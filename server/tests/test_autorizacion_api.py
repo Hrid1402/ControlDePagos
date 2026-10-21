@@ -104,6 +104,16 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
         "asistente ajena e id inexistente: "
         "test_api_detalle_deuda::test_la_deuda_de_otro_gerente_responde_404"
     ),
+    ("GET", "/api/v1/deudas/{deuda_id}/comentarios"): (
+        "asistente ajena: test_api_comentarios::"
+        "test_anulada_no_admite_comentarios_y_otro_gerente_no_los_ve"
+    ),
+    ("POST", "/api/v1/deudas/{deuda_id}/comentarios"): (
+        "asistente ajena: test_api_comentarios::"
+        "test_anulada_no_admite_comentarios_y_otro_gerente_no_los_ve"
+    ),
+    ("PUT", "/api/v1/deudas/{deuda_id}"): "MATRIZ",
+    ("POST", "/api/v1/deudas/{deuda_id}/anular"): "MATRIZ",
     # Comprobantes (TASK-84): probadas en sus archivos.
     ("GET", "/api/v1/comprobantes/{comprobante_id}"): (
         "gerente ajeno e id inexistente: "
@@ -240,6 +250,16 @@ MATRIZ = [
         motivo_de_cancelacion,
     ),
     Caso("POST", "/api/v1/deudas/{deuda_id}/fijar", "gerente_ajeno", SIN_PERMISO, deuda),
+    Caso(
+        "PUT",
+        "/api/v1/deudas/{deuda_id}",
+        "asistente_ajena",
+        NO_ENCONTRADO,
+        deuda,
+        lambda db, equipos: {"monto": "1.00"},
+    ),
+    Caso("POST", "/api/v1/deudas/{deuda_id}/anular", "gerente_ajeno", NO_ENCONTRADO, deuda),
+    Caso("POST", "/api/v1/deudas/{deuda_id}/anular", "asistente_propia", SIN_PERMISO, deuda),
     Caso("POST", "/api/v1/deudas/{deuda_id}/recordar-manana", "gerente_ajeno", SIN_PERMISO, deuda),
     *(
         Caso(
