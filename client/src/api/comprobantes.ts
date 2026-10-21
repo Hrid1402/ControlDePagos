@@ -23,3 +23,15 @@ export async function obtenerComprobante(id: string): Promise<Comprobante> {
   const { data } = await http.get<Comprobante>(`/comprobantes/${id}`)
   return data
 }
+
+/** El gerente valida el voucher con un clic (H24 CA07, TASK-109). */
+export async function aprobarComprobante(id: string): Promise<Comprobante> {
+  const { data } = await http.post<Comprobante>(`/comprobantes/${id}/aprobar`)
+  return data
+}
+
+/** El gerente lo rechaza con el motivo, que recibe la asistente para subir otro. */
+export async function rechazarComprobante(id: string, motivo: string): Promise<Comprobante> {
+  const { data } = await http.post<Comprobante>(`/comprobantes/${id}/rechazar`, { motivo })
+  return data
+}
