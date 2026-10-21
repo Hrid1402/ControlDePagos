@@ -12,9 +12,10 @@ import {
   type ItemDeuda,
   type Totales,
 } from '@/components/deudas/listado'
-import { hoyEnLima, type DatosDeuda, type DeudaExistente } from '@/components/deudas/modelo'
+import { hoyEnLima } from '@/components/deudas/modelo'
 import type { Servicio } from '@/components/servicios/modelo'
-import { listarDeudas, registrarDeuda } from '@/api/deudas'
+import { listarDeudas } from '@/api/deudas'
+import { useRegistroDeuda } from '@/composables/useRegistroDeuda'
 import { listarCategorias } from '@/api/categorias'
 import { listarServicios } from '@/api/servicios'
 import { useSesionStore } from '@/stores/sesion'
@@ -76,7 +77,10 @@ function abrir(id: string) {
 // Registrar deuda (CA12): el formulario de H11 con los servicios activos del gerente.
 const registrando = ref(false)
 const servicios = ref<Servicio[]>([])
-const duplicada = ref<DeudaExistente | null>(null)
+const { registrar, duplicada } = useRegistroDeuda(async () => {
+  registrando.value = false
+  await cargar()
+})
 
 async function abrirRegistro() {
   duplicada.value = null
@@ -96,32 +100,6 @@ async function abrirRegistro() {
       detail: (fallo as ErrorApi).detail,
       life: 5000,
     })
-  }
-}
-
-async function guardar(datos: DatosDeuda) {
-  duplicada.value = null
-  if (datos.tipo === 'prestamo' || datos.repetir) {
-    const pendiente: ErrorApi = {
-      status: 0,
-      code: 'NO_DISPONIBLE',
-      detail:
-        'Por ahora registra la deuda de este mes: los préstamos y las deudas que se repiten se configuran pronto.',
-      field: null,
-    }
-    throw pendiente
-  }
-  try {
-    const { id } = await registrarDeuda(datos)
-    registrando.value = false
-    toast.add({ severity: 'success', summary: 'Deuda registrada', life: 4000 })
-    await cargar()
-    return id
-  } catch (fallo) {
-    const error = fallo as ErrorApi
-    if (error.code === 'DUPLICADO' && error.datos?.deuda_existente)
-      duplicada.value = error.datos.deuda_existente as DeudaExistente
-    throw fallo
   }
 }
 </script>
@@ -147,7 +125,7 @@ async function guardar(datos: DatosDeuda) {
   <FormularioDeuda
     v-if="registrando"
     :servicios="servicios"
-    :guardar="guardar"
+    :guardar="registrar"
     :duplicada="duplicada"
     @cerrar="registrando = false"
     @ver-duplicada="abrir"

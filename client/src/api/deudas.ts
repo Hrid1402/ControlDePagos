@@ -40,7 +40,60 @@ export async function registrarDeuda(datos: DatosDeuda): Promise<{ id: string }>
     fecha_vencimiento: datos.fecha_vencimiento,
     periodo: datos.periodo,
     numero_recibo: datos.numero_recibo,
+    fecha_emision: datos.fecha_emision,
+    fecha_corte: datos.fecha_corte,
+    pago_minimo: datos.pago_minimo,
   })
+  return data
+}
+
+/** Préstamo con su cronograma (CA07): una deuda por cuota. */
+export async function crearPrestamo(datos: DatosDeuda): Promise<{ id: string }> {
+  const { data } = await http.post<{ id: string }>('/prestamos', {
+    servicio_id: datos.servicio_id,
+    monto_total: datos.monto_total,
+    cuotas_total: datos.cuotas_total,
+    fecha_primera_cuota: datos.fecha_primera_cuota,
+    moneda: datos.moneda,
+  })
+  return data
+}
+
+export interface Recurrencia {
+  monto: string | null
+  moneda: string
+  dia_emision: number | null
+  dia_vencimiento: number
+  activa: boolean
+}
+
+/** La deuda se repite cada mes (CA04 y CA05). */
+export async function configurarRecurrencia(servicioId: string, datos: Recurrencia): Promise<void> {
+  await http.put(`/servicios/${servicioId}/recurrencia`, datos)
+}
+
+export async function subirRecibo(deudaId: string, archivo: File): Promise<DetalleDeuda> {
+  const datos = new FormData()
+  datos.append('archivo', archivo)
+  const { data } = await http.post<DetalleDeuda>(`/deudas/${deudaId}/recibo`, datos)
+  return data
+}
+
+export interface CambiosDeuda {
+  monto?: string
+  fecha_vencimiento?: string
+  fecha_emision?: string
+  numero_recibo?: string
+  pago_minimo?: string
+}
+
+export async function editarDeuda(id: string, cambios: CambiosDeuda): Promise<DetalleDeuda> {
+  const { data } = await http.put<DetalleDeuda>(`/deudas/${id}`, cambios)
+  return data
+}
+
+export async function anularDeuda(id: string, motivo: string | null): Promise<DetalleDeuda> {
+  const { data } = await http.post<DetalleDeuda>(`/deudas/${id}/anular`, motivo ? { motivo } : {})
   return data
 }
 
