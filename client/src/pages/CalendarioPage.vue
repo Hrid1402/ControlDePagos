@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import Dialog from 'primevue/dialog'
+import Button from 'primevue/button'
+import { useRouter } from 'vue-router'
+import { useSesionStore } from '@/stores/sesion'
 import {
   consultarCalendario,
   exportarCalendario,
@@ -88,6 +91,13 @@ function abrirDeuda(id: string) {
     dias.value.flatMap((dia) => dia.deudas).find((deuda) => deuda.id === id) || null
 }
 
+const router = useRouter()
+const sesion = useSesionStore()
+/** H16 CA: desde el vencimiento se abre el detalle de la deuda (H17). */
+function verDeuda(id: string) {
+  deudaSeleccionada.value = null
+  void router.push({ name: `${sesion.rol}-deuda`, params: { id } })
+}
 function moneda(valor: string, codigo: string) {
   return `${codigo === 'PEN' ? 'S/' : '$'} ${valor}`
 }
@@ -145,6 +155,15 @@ function moneda(valor: string, codigo: string) {
         <dd>Por confirmar</dd>
       </div>
     </dl>
+    <template #footer>
+      <Button
+        v-if="deudaSeleccionada"
+        label="Ver la deuda completa"
+        icon="pi pi-arrow-right"
+        icon-pos="right"
+        @click="verDeuda(deudaSeleccionada.id)"
+      />
+    </template>
   </Dialog>
 </template>
 
