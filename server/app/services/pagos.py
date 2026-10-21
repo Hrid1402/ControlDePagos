@@ -61,7 +61,6 @@ class ResultadoInicio(StrEnum):
 class Autorizacion(StrEnum):
     """Por qué se permite el pago; queda en el detalle de la auditoría."""
 
-    GERENTE = "gerente"
     ORDEN = "orden"
     APROBACION = "aprobacion"
     LIMITE = "limite"
@@ -262,11 +261,12 @@ def iniciar_pago(
     efectos nuevos; el intento o la solicitud de otra persona responde 409.
     """
     gerente_id = gerente_de(usuario)
-    if gerente_id is None:
+    # Pagar y subir el voucher es de la asistente; el gerente registra, ordena y valida
+    # (decisión del 20/10/2026, TASK-109).
+    if gerente_id is None or usuario.rol != "asistente":
         raise sin_permiso()
     momento = ahora or ahora_lima()
-    es_asistente = usuario.rol == "asistente"
-    limite = bloquear_limite(db, gerente_id) if es_asistente else None
+    limite = bloquear_limite(db, gerente_id)
     deuda = bloquear_deuda(db, deuda_id, gerente_id)
 
     if deuda.estado == "en_proceso":
@@ -299,9 +299,7 @@ def iniciar_pago(
         raise ErrorApi(409, "SIN_SALDO", "La deuda no tiene saldo pendiente.")
 
     detalle: dict[str, object] = {"estado_anterior": deuda.estado, "saldo": saldo}
-    if not es_asistente:
-        autorizacion = Autorizacion.GERENTE
-    elif orden is not None:
+    if orden is not None:
         validar_orden(orden, deuda, usuario, saldo)
         autorizacion = Autorizacion.ORDEN
         detalle["orden_id"] = orden.orden.id
@@ -439,6 +437,9 @@ def acciones_de_pago(db: Session, deuda: Deuda, usuario: Usuario) -> AccionesPag
     )
     saldo = saldo_de(db, deuda)
     return AccionesPago(
-        iniciar=deuda.estado in ESTADOS_INICIABLES and saldo is not None and saldo > 0,
+        iniciar=usuario.rol == "asistente"
+        and deuda.estado in ESTADOS_INICIABLES
+        and saldo is not None
+        and saldo > 0,
         cancelar_inicio=puede_cancelar,
     )
