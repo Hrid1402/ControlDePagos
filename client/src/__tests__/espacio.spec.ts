@@ -25,6 +25,15 @@ vi.mock('@/api/calendario', () => ({
   listarCategoriasCalendario: vi.fn().mockResolvedValue([]),
   exportarCalendario: vi.fn(),
 }))
+vi.mock('@/api/bandeja', () => ({
+  obtenerBandejaCompleta: vi.fn().mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    contadores: { por_pagar: 0, por_validar: 0, rechazadas: 0 },
+  }),
+}))
+vi.mock('@/api/categorias', () => ({ listarCategorias: vi.fn().mockResolvedValue([]) }))
 
 const montados: VueWrapper[] = []
 const limpiezas: (() => void)[] = []
@@ -177,9 +186,15 @@ describe('espacios y avisos de sesión', () => {
       expect(wrapper.get('img').attributes('src')).toContain('wordmark-white.svg')
       const pestanas = wrapper.findAll('nav[aria-label="Secciones"] a').map((a) => a.text())
       expect(pestanas).toEqual(expect.arrayContaining([...etiquetas]))
-      // La sección de inicio sin pantalla todavía lo dice; no muestra datos de ejemplo.
-      expect(wrapper.get('main h1').text()).toBe(etiquetas[0])
-      expect(wrapper.text()).toContain('Esta sección se habilitará')
+      if (rol === 'gerente') {
+        // La sección de inicio sin pantalla todavía lo dice; no muestra datos de ejemplo.
+        expect(wrapper.get('main h1').text()).toBe(etiquetas[0])
+        expect(wrapper.text()).toContain('Esta sección se habilitará')
+      } else {
+        // El inicio de la asistente es su bandeja (H15 CA01).
+        expect(wrapper.get('main h1').text()).toBe('Hola, Ana')
+        expect(wrapper.text()).toContain('Todo al día')
+      }
       expect(wrapper.get('nav[aria-label="Secciones"] a.activa').text()).toBe(etiquetas[0])
 
       await wrapper.findAll('nav[aria-label="Secciones"] a')[1]!.trigger('click')

@@ -136,8 +136,16 @@ describe('ingreso conectado a la API', () => {
       url: '/auth/login',
       cuerpo: { username: 'Ana.Paz', contrasena: CLAVE },
     })
-    // Después solo se lee el perfil, para saber si falta aceptar la política (H02 CA10).
-    expect(peticiones.slice(1).map((p) => p.url)).toEqual(['/usuarios/perfil'])
+    // Después solo se lee el perfil, para saber si falta aceptar la política (H02 CA10), y lo que
+    // muestra el inicio: la asistente entra a su bandeja (H15 CA01).
+    expect(
+      peticiones
+        .slice(1)
+        .map((p) => p.url)
+        .sort(),
+    ).toEqual(
+      rol === 'gerente' ? ['/usuarios/perfil'] : ['/bandeja', '/categorias', '/usuarios/perfil'],
+    )
     expect(useSesionStore().token).toBe(token)
     expect(JSON.parse(localStorage.getItem(CLAVE_SESION) ?? '{}').token).toBe(token)
     expect(almacenado()).not.toContain(CLAVE)
