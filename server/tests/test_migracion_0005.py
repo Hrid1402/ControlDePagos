@@ -15,10 +15,8 @@ from alembic.config import Config
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, ProgrammingError
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import Categoria, Deuda, Servicio, Usuario
 
 PRIVILEGIO_INSUFICIENTE = "42501"
 
@@ -72,32 +70,41 @@ def version_de(motor: Engine) -> str:
 
 
 def insertar_deuda_sin_monto(motor: Engine, estado: str = "esperando_recibo") -> uuid.UUID:
-    with Session(motor) as sesion:
-        gerente = Usuario(rol="gerente", username="gerente_mig", password_hash="x")
-        sesion.add(gerente)
-        sesion.flush()
-        categoria = Categoria(gerente_id=gerente.id, nombre="Luz", tipo="servicio_variable")
-        sesion.add(categoria)
-        sesion.flush()
-        servicio = Servicio(
-            gerente_id=gerente.id,
-            categoria_id=categoria.id,
-            empresa_nombre="Hidrandina",
-            codigo_suministro="123456",
+    """SQL directo con las columnas que existen en 0005: el modelo puede tener columnas de
+    migraciones posteriores que esta base todavía no tiene."""
+    ids = {clave: uuid.uuid4() for clave in ("gerente", "categoria", "servicio", "deuda")}
+    with motor.begin() as conexion:
+        conexion.execute(
+            text(
+                "INSERT INTO usuario (id, rol, username, password_hash) "
+                "VALUES (:gerente, 'gerente', 'gerente_mig', 'x')"
+            ),
+            ids,
         )
-        sesion.add(servicio)
-        sesion.flush()
-        deuda = Deuda(
-            gerente_id=gerente.id,
-            servicio_id=servicio.id,
-            periodo=date(2026, 10, 1),
-            monto=None,
-            estado=estado,
-            fecha_vencimiento=date(2026, 10, 20),
+        conexion.execute(
+            text(
+                "INSERT INTO categoria (id, gerente_id, nombre, tipo) "
+                "VALUES (:categoria, :gerente, 'Luz', 'servicio_variable')"
+            ),
+            ids,
         )
-        sesion.add(deuda)
-        sesion.commit()
-        return deuda.id
+        conexion.execute(
+            text(
+                "INSERT INTO servicio (id, gerente_id, categoria_id, empresa_nombre, "
+                "codigo_suministro) "
+                "VALUES (:servicio, :gerente, :categoria, 'Hidrandina', '123456')"
+            ),
+            ids,
+        )
+        conexion.execute(
+            text(
+                "INSERT INTO deuda (id, gerente_id, servicio_id, periodo, monto, estado, "
+                "fecha_vencimiento) VALUES (:deuda, :gerente, :servicio, :periodo, NULL, :estado, "
+                ":vence)"
+            ),
+            ids | {"periodo": date(2026, 10, 1), "estado": estado, "vence": date(2026, 10, 20)},
+        )
+    return ids["deuda"]
 
 
 def test_ida_y_vuelta_de_la_migracion(base_temporal: Engine) -> None:
@@ -127,10 +134,12 @@ def test_el_downgrade_con_deudas_sin_monto_falla_sin_tocar_datos(base_temporal: 
 
     assert version_de(base_temporal) == "0005"
     assert monto_admite_nulo(base_temporal)
-    with Session(base_temporal) as sesion:
-        deuda = sesion.get_one(Deuda, deuda_id)
-        assert deuda.monto is None
-        assert deuda.estado == "esperando_recibo"
+    with base_temporal.connect() as conexion:
+        monto, estado = conexion.execute(
+            text("SELECT monto, estado FROM deuda WHERE id = :id"), {"id": deuda_id}
+        ).one()
+    assert monto is None
+    assert estado == "esperando_recibo"
 
 
 def test_el_downgrade_funciona_si_las_deudas_sin_monto_se_resuelven(
