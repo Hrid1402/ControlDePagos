@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from celery.canvas import Signature
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,6 +21,12 @@ from tests.test_api_comprobantes import cabecera, en_proceso, subir
 from tests.test_archivos import imagen, pdf
 
 RUTA = "/api/v1/comprobantes"
+
+
+@pytest.fixture(autouse=True)
+def sin_cola(enviadas: list[Signature]) -> list[Signature]:
+    """Ninguna subida de estas pruebas llega a Redis."""
+    return enviadas
 
 
 @pytest.fixture

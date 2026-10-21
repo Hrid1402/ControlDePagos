@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     s3_access_key: str
     s3_secret_key: str
 
+    # El worker de la cola ocr carga el modelo al iniciar cada proceso (pnpm worker:ocr lo activa).
+    ocr_precargar: bool = False
+
     # Responsable que informa la política de privacidad (app/core/politica.py). Cada instalación
     # debe configurar su domicilio y su correo de contacto antes de producción.
     politica_responsable: str = "Deconsta"

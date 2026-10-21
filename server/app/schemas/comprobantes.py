@@ -23,6 +23,8 @@ class ComprobanteSalida(BaseModel):
     id: uuid.UUID
     estado: str
     motivo_codigo: str | None
+    # Motivo y acción a seguir en palabras, para mostrar con el resultado (CA03).
+    observacion: str | None
     archivo_tipo: str
     archivo_enlace: str | None
     moneda: str

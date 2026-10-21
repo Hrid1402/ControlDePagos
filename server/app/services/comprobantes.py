@@ -14,6 +14,8 @@ Reglas al subir, todas con las deudas bloqueadas hasta el commit:
 - El archivo se guarda antes de insertar. Si la inserción falla se borra aquí, y si falla el
   commit lo borra confirmar_con_archivo: no quedan archivos huérfanos.
 - Las deudas pasan a por_validar hasta que el comprobante se resuelve.
+- La validación automática (OCR) se encola en la cola ocr solo si la subida se confirma
+  (app/workers/comprobantes.py). Si no se pudo encolar, la recupera su revisión programada.
 
 Reemplazo (CA08): un comprobante rechazado se reemplaza por otro nuevo con reemplaza_a_id, con
 el mismo reparto y las mismas reglas; el rechazado se conserva como historial.
@@ -43,6 +45,8 @@ from app.services.archivos import (
 )
 from app.services.auditoria import Accion, registrar_auditoria
 from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO, saldo_de
+from app.workers.celery_app import TAREA_PROCESAR_COMPROBANTE, celery_app
+from app.workers.encolar import encolar_tras_commit
 
 # Estados de la deuda sobre los que cualquiera del equipo adjunta: hay un intento de pago.
 ESTADOS_CON_INTENTO = ("en_proceso", "por_validar")
@@ -244,6 +248,9 @@ def registrar(
             deuda.pago_iniciado_en = ahora
             deuda.recordatorios_enviados = 0
         deuda.estado = "por_validar"
+    encolar_tras_commit(
+        db, celery_app.signature(TAREA_PROCESAR_COMPROBANTE, args=(str(comprobante.id),))
+    )
     return comprobante
 
 

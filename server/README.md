@@ -121,6 +121,7 @@ misma configuración que la API (`DATABASE_URL`). No necesitan variables de ento
 | `app/workers/encolar.py` | Encolar una tarea solo si la transacción se confirma |
 | `app/workers/latido.py` | Latido: job de ejemplo que comprueba que todo responde |
 | `app/workers/aprobaciones.py` | Recordatorios de solicitudes de aprobación pendientes (H05) |
+| `app/workers/comprobantes.py` | Validación de comprobantes en la cola `ocr` y su recuperación (H24) |
 
 ### Arranque local
 
@@ -130,6 +131,7 @@ Requiere los servicios levantados (`pnpm services:up`) y la base migrada.
 pnpm dev             # client, server, worker y beat
 pnpm worker:server   # solo el worker, en otra terminal
 pnpm beat:server     # solo Beat, en otra terminal
+pnpm worker:ocr      # worker de la cola ocr (ver OCR de comprobantes)
 ```
 
 El worker escucha la cola `general` con dos procesos y se reinicia solo cuando cambia un archivo
@@ -148,6 +150,40 @@ docker compose exec redis redis-cli GET control_pagos:latido
 
 Devuelve la hora de Lima de la última ejecución y la hora de la base. La clave vence a los
 15 minutos: si no existe, el worker o Beat están detenidos.
+
+### OCR de comprobantes
+
+La validación de comprobantes (H24) corre en su propia cola, `ocr`, con un worker de un solo
+proceso que precarga PaddleOCR al arrancar. Así una lectura de unos segundos no retrasa los
+recordatorios de la cola `general`. La API y el worker general no instalan ni importan el OCR.
+
+```bash
+brew install poppler          # macOS; en Debian o Ubuntu: apt install poppler-utils
+pnpm worker:ocr               # en otra terminal; la primera vez instala el grupo ocr
+```
+
+`pnpm worker:ocr` ejecuta `uv run --group ocr`, que instala PaddleOCR (cerca de 1 GB), y la
+primera lectura descarga los modelos de español en `~/.paddlex`. Poppler (`pdftoppm`) convierte
+los PDF en imágenes. Sin el worker de OCR levantado, los comprobantes se quedan en `procesando`
+y la revisión programada los vuelve a encolar cuando el worker arranca.
+
+| Paso | Dónde | Qué hace |
+|---|---|---|
+| Subida | `app/services/comprobantes.py` | Guarda el archivo y encola `procesar_comprobante` tras el commit |
+| Lectura | `app/ocr/motor.py` | PDF hasta 2 páginas a 200 ppp; imágenes reducidas a 2000 px; texto y confianza por línea |
+| Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Con texto: revisión del gerente hasta que existan extractores y reglas |
+| Avisos | `app/services/validacion.py` | Notificación y evento `comprobante_resultado` después del commit |
+| Recuperación | `recuperar_comprobantes`, cada 5 minutos | Vuelve a encolar lo que lleva 10 minutos en `procesando`; a la tercera vez lo deja en revisión |
+
+Cada lectura tiene 45 s de límite y se reintenta 2 veces (a los 10 s y a los 20 s) si falla el
+OCR, la conversión del PDF o S3. Agotados los reintentos, el comprobante pasa a revisión del
+gerente con la explicación: nunca se pierde el registro. La tarea es idempotente: si el
+comprobante ya no está en `procesando`, termina sin efectos.
+
+Medición del objetivo de 10 s (contrato H24, punto 7): `tests/test_ocr_motor.py` lee con el
+modelo ya cargado un comprobante sintético de una página. En un Mac con Apple Silicon (CPU, sin
+GPU) tarda 2,3 s; la carga del modelo, que se hace una vez por proceso, tarda unos 10 s. La
+prueba se omite si el grupo `ocr` no está instalado, como en la CI.
 
 ### Configuración
 

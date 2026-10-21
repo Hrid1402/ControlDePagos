@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from celery.canvas import Signature
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,10 +21,17 @@ from app.core.seguridad import crear_token
 from app.main import app
 from app.models import Auditoria, Comprobante, ComprobanteDeuda, Deuda, Usuario
 from app.services import archivos
+from app.workers.celery_app import celery_app
 from tests.conftest import DosGerentes, Equipo, S3EnMemoria, nueva_deuda, nuevo_comprobante
 from tests.test_archivos import imagen, pdf
 
 RUTA = "/api/v1/comprobantes"
+
+
+@pytest.fixture(autouse=True)
+def sin_cola(enviadas: list[Signature]) -> list[Signature]:
+    """Ninguna subida de estas pruebas llega a Redis."""
+    return enviadas
 
 
 @pytest.fixture
@@ -396,3 +404,25 @@ def test_si_el_commit_falla_se_borra_el_archivo(s3: S3EnMemoria) -> None:
         archivos.confirmar_con_archivo(SesionQueFalla(), "comprobantes/huerfano.png")  # type: ignore[arg-type]
 
     assert s3.objetos == {}
+
+
+def test_la_subida_encola_la_validacion_en_la_cola_ocr(
+    cliente: TestClient,
+    db: Session,
+    dos_gerentes: DosGerentes,
+    s3: S3EnMemoria,
+    enviadas: list[Signature],
+) -> None:
+    equipo = dos_gerentes.uno
+    deuda = en_proceso(db, equipo)
+
+    rechazada = subir(cliente, equipo.asistente, [{"deuda_id": str(uuid.uuid4())}])
+    assert rechazada.status_code == 404
+    assert enviadas == []
+
+    r = subir(cliente, equipo.asistente, [{"deuda_id": str(deuda.id)}])
+
+    assert [(f.task, f.args) for f in enviadas] == [
+        ("app.workers.comprobantes.procesar_comprobante", (r.json()["id"],))
+    ]
+    assert celery_app.amqp.router.route({}, enviadas[0].task)["queue"].name == "ocr"

@@ -52,6 +52,7 @@ def comprobante_salida(
         id=comprobante.id,
         estado=comprobante.estado,
         motivo_codigo=comprobante.motivo_codigo,
+        observacion=comprobante.datos_extraidos.get("observacion"),
         archivo_tipo=comprobante.archivo_tipo,
         archivo_enlace=enlace_firmado(comprobante.archivo_url) if con_enlace else None,
         moneda=comprobante.moneda,
