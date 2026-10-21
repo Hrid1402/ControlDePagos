@@ -60,6 +60,7 @@ def comprobante_salida(
         entidad=comprobante.entidad,
         numero_operacion=comprobante.numero_operacion,
         fecha_pago=comprobante.fecha_pago,
+        datos_extraidos=comprobante.datos_extraidos,
         deuda_sugerida_id=comprobante.deuda_sugerida_id,
         reemplaza_a_id=comprobante.reemplaza_a_id,
         reemplazado_por_id=reemplazo.id if reemplazo else None,

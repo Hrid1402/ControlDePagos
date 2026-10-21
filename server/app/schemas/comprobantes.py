@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,9 @@ class ComprobanteSalida(BaseModel):
     entidad: str | None
     numero_operacion: str | None
     fecha_pago: datetime | None
+    # Entidad y campos leídos con su confianza, faltantes y, si fue duplicado de un comprobante
+    # propio, cuál y en qué deudas se usó.
+    datos_extraidos: dict[str, Any]
     deuda_sugerida_id: uuid.UUID | None
     reemplaza_a_id: uuid.UUID | None
     reemplazado_por_id: uuid.UUID | None
