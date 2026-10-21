@@ -1,8 +1,12 @@
 """Extracción aplicada al comprobante y duplicado por número de operación (H24 CA04, TASK-86).
 
+Los comprobantes son de una deuda que coincide con la constancia BCP del banco de ejemplos: con
+los datos completos, las reglas (TASK-87) la validan.
+
 aplicar_lectura se llama con el comprobante bloqueado, como lo hace el worker de OCR.
 """
 
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -12,20 +16,23 @@ from app.ocr.motor import LecturaOcr, Linea
 from app.services.validacion import (
     ACCION_A_SEGUIR,
     MENSAJE_FORMATO_DESCONOCIDO,
-    MENSAJE_SIN_REGLAS,
     aplicar_lectura,
     bloquear_comprobante,
 )
-from tests.conftest import DosGerentes, Equipo, nueva_deuda, nuevo_comprobante
+from tests.conftest import DosGerentes, Equipo
 from tests.ejemplos_comprobantes import EJEMPLOS, lima
+from tests.test_validacion_abonos import comprobante_de, deuda_de
 
 BCP = next(e for e in EJEMPLOS if e.nombre == "bcp_app")
 
 
-def procesando(db: Session, equipo: Equipo) -> tuple[Comprobante, Deuda]:
-    deuda = nueva_deuda(db, equipo.gerente, monto="85.40", estado="por_validar")
-    comprobante = nuevo_comprobante(db, deuda, equipo.asistente, "85.40", estado="procesando")
-    return comprobante, deuda
+def procesando(
+    db: Session, equipo: Equipo, periodo: date = date(2026, 10, 1)
+) -> tuple[Comprobante, Deuda]:
+    """Comprobante en procesando de una deuda de Hidrandina 12345678 por S/ 85.40, como la
+    constancia BCP del banco de ejemplos."""
+    deuda = deuda_de(db, equipo.gerente, periodo=periodo)
+    return comprobante_de(db, equipo, [(deuda, "85.40")]), deuda
 
 
 def aplicar(db: Session, comprobante: Comprobante, lectura: LecturaOcr) -> Comprobante:
@@ -43,8 +50,7 @@ def test_guarda_los_campos_extraidos_del_comprobante(
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert (resultado.estado, resultado.motivo_codigo) == ("en_revision", None)
-    assert resultado.datos_extraidos["observacion"] == MENSAJE_SIN_REGLAS
+    assert (resultado.estado, resultado.motivo_codigo) == ("validado", None)
     assert (resultado.entidad, resultado.numero_operacion) == ("bcp", "00456789")
     assert resultado.monto == Decimal("85.40")
     assert resultado.fecha_pago == lima(2026, 10, 20, 10, 35)
@@ -89,8 +95,7 @@ def test_la_misma_operacion_dos_veces_indica_en_que_deuda_se_uso(
     equipo = dos_gerentes.uno
     primero, deuda_primera = procesando(db, equipo)
     aplicar(db, primero, BCP.lectura())
-    segundo, deuda_segunda = procesando(db, equipo)
-    deuda_segunda.pago_iniciado_por = equipo.asistente.id
+    segundo, deuda_segunda = procesando(db, equipo, date(2026, 9, 1))
 
     resultado = aplicar(db, segundo, BCP.lectura())
 
@@ -106,6 +111,7 @@ def test_la_misma_operacion_dos_veces_indica_en_que_deuda_se_uso(
     db.refresh(deuda_segunda)
     assert deuda_segunda.estado == "en_proceso"
     aviso = db.query(Notificacion).filter_by(tipo="comprobante_rechazado").one()
+    assert aviso.usuario_id == equipo.asistente.id
     assert aviso.mensaje == mensaje
 
 
@@ -130,11 +136,11 @@ def test_una_operacion_de_un_comprobante_rechazado_se_puede_usar(
     anterior, _ = procesando(db, equipo)
     anterior.entidad, anterior.numero_operacion, anterior.estado = "bcp", "00456789", "rechazado"
     db.flush()
-    comprobante, _ = procesando(db, equipo)
+    comprobante, _ = procesando(db, equipo, date(2026, 9, 1))
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert (resultado.estado, resultado.numero_operacion) == ("en_revision", "00456789")
+    assert (resultado.estado, resultado.numero_operacion) == ("validado", "00456789")
 
 
 def test_el_mismo_numero_en_otra_entidad_no_es_duplicado(
@@ -144,11 +150,11 @@ def test_el_mismo_numero_en_otra_entidad_no_es_duplicado(
     otro, _ = procesando(db, equipo)
     otro.entidad, otro.numero_operacion = "interbank", "00456789"
     db.flush()
-    comprobante, _ = procesando(db, equipo)
+    comprobante, _ = procesando(db, equipo, date(2026, 9, 1))
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert resultado.estado == "en_revision"
+    assert resultado.estado == "validado"
 
 
 def test_un_comprobante_resuelto_no_se_vuelve_a_aplicar(
@@ -160,4 +166,4 @@ def test_un_comprobante_resuelto_no_se_vuelve_a_aplicar(
     bloqueado = bloquear_comprobante(db, comprobante.id)
     assert bloqueado is not None
     assert aplicar_lectura(db, bloqueado, LecturaOcr([], 1)) is False
-    assert bloqueado.estado == "en_revision"
+    assert bloqueado.estado == "validado"

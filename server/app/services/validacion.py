@@ -9,8 +9,9 @@ comprobante bloqueado. Este módulo decide el resultado y lo aplica en la misma 
   por duplicado. Si el otro es del mismo gerente, se indica en qué deudas se usó; si es ajeno, el
   mensaje es genérico (contrato H24, punto 5).
 - Entidad no admitida o algún campo clave ausente: revisión del gerente con la explicación.
-- Con los datos completos: revisión del gerente hasta que existan las reglas de validación
-  (TASK-87); nunca se valida por el solo hecho de tener texto.
+- Con los datos completos deciden las reglas documentales (app/services/reglas_comprobante.py):
+  validado (completo o pago parcial), en revisión o rechazado por otra_deuda, con la deuda que
+  parece corresponder como sugerencia. El validado aplica sus abonos (app/services/abonos.py).
 - Si la lectura falla tras sus reintentos, sin_lectura lo deja en revisión con la explicación:
   el registro se conserva y el gerente decide.
 
@@ -35,8 +36,10 @@ from app.core.tiempo import ahora_lima
 from app.models import Comprobante, ComprobanteDeuda, Deuda, Empresa, Servicio, Usuario
 from app.ocr.extraccion import CampoClave, DatosComprobante, Entidad, extraer
 from app.ocr.motor import LecturaOcr
+from app.services.abonos import aplicar_abonos, otro_activo
 from app.services.notificaciones import TipoNotificacion, notificar
-from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO
+from app.services.reglas_comprobante import DeudaReparto, evaluar, normalizar_codigo
+from app.services.saldo import ESTADOS_CERRADOS
 
 UMBRAL_ILEGIBLE = 0.6
 # El texto completo de un comprobante cabe de sobra; el límite evita guardar basura de un PDF.
@@ -49,7 +52,6 @@ ACCION_A_SEGUIR = {
     "otra_deuda": "El comprobante corresponde a otra deuda. Revisa la deuda o adjunta el "
     "comprobante correcto.",
 }
-MENSAJE_SIN_REGLAS = "Los datos del comprobante aún no se validan solos: lo revisa el gerente."
 MENSAJE_FORMATO_DESCONOCIDO = (
     "No se reconoce el formato del comprobante: lo revisa el gerente. Se validan solos los de "
     "BCP, Interbank, BBVA, Scotiabank, Yape, Plin, Agente BCP y KasNet."
@@ -91,22 +93,6 @@ def deudas_de(db: Session, comprobante: Comprobante) -> list[Deuda]:
     )
 
 
-def otro_activo(db: Session, deuda_id: uuid.UUID, comprobante_id: uuid.UUID) -> bool:
-    return (
-        db.scalar(
-            select(Comprobante.id)
-            .join(ComprobanteDeuda, ComprobanteDeuda.comprobante_id == Comprobante.id)
-            .where(
-                ComprobanteDeuda.deuda_id == deuda_id,
-                Comprobante.id != comprobante_id,
-                Comprobante.estado.in_(ESTADOS_COMPROBANTE_ACTIVO),
-            )
-            .limit(1)
-        )
-        is not None
-    )
-
-
 def guardar_lectura(comprobante: Comprobante, lectura: LecturaOcr) -> None:
     comprobante.texto_ocr = lectura.texto[:LARGO_MAXIMO_TEXTO]
     comprobante.confianza = Decimal(str(lectura.confianza)).quantize(
@@ -131,6 +117,33 @@ def publicar_resultado(db: Session, comprobante: Comprobante, deudas: list[Deuda
         publicar_tras_commit(db, usuario_id, Evento(TipoEvento.COMPROBANTE_RESULTADO, datos))
 
 
+def avisar(db: Session, comprobante: Comprobante, deudas: list[Deuda], ahora: datetime) -> None:
+    """Notifica según el resultado y publica comprobante_resultado. El validado no notifica aquí:
+    cada deuda pagada avisa al gerente desde aplicar_abonos."""
+    una_deuda = deudas[0].id if len(deudas) == 1 else None
+    observacion = comprobante.datos_extraidos.get("observacion", "")
+    if comprobante.estado == "rechazado":
+        destinatario = db.get(Usuario, comprobante.subido_por)
+        tipo, titulo = TipoNotificacion.COMPROBANTE_RECHAZADO, "Comprobante rechazado"
+    elif comprobante.estado == "en_revision":
+        destinatario = db.get(Usuario, comprobante.gerente_id)
+        tipo, titulo = TipoNotificacion.COMPROBANTE_EN_REVISION, "Comprobante por revisar"
+    else:
+        destinatario = None
+    if destinatario is not None:
+        notificar(
+            db,
+            destinatario,
+            tipo,
+            titulo,
+            observacion,
+            deuda_id=una_deuda,
+            clave_evento=f"{tipo.value}:{comprobante.id}",
+            ahora=ahora,
+        )
+    publicar_resultado(db, comprobante, deudas)
+
+
 def resolver(
     db: Session,
     comprobante: Comprobante,
@@ -138,13 +151,26 @@ def resolver(
     motivo: str | None,
     observacion: str,
     ahora: datetime,
+    aplicados: dict[uuid.UUID, Decimal] | None = None,
 ) -> None:
-    """Aplica un resultado en_revision o rechazado y avisa. El comprobante ya está bloqueado."""
+    """Aplica un resultado y avisa. El comprobante ya está bloqueado.
+
+    validado aplica los abonos de aplicados; si el saldo de una deuda ya no alcanza (otro
+    comprobante se validó antes), queda en revisión. rechazado devuelve sus deudas al intento
+    vigente; en_revision las deja en por_validar."""
     deudas = deudas_de(db, comprobante)
+    if estado == "validado":
+        assert aplicados is not None
+        sin_saldo = aplicar_abonos(db, comprobante, deudas, aplicados, ahora)
+        if sin_saldo is not None:
+            estado, motivo = "en_revision", "monto_mayor"
+            observacion = (
+                "Otro comprobante ya cubrió parte de la deuda y este supera su saldo: lo revisa "
+                "el gerente."
+            )
     comprobante.estado = estado
     comprobante.motivo_codigo = motivo
     comprobante.datos_extraidos = {**comprobante.datos_extraidos, "observacion": observacion}
-    una_deuda = deudas[0].id if len(deudas) == 1 else None
     if estado == "rechazado":
         for deuda in deudas:
             if deuda.estado == "por_validar" and not otro_activo(db, deuda.id, comprobante.id):
@@ -152,32 +178,7 @@ def resolver(
                 # los recordatorios de comprobante pendiente empiezan de nuevo (TASK-91).
                 deuda.estado = "en_proceso"
                 deuda.recordatorios_enviados = 0
-        subio = db.get(Usuario, comprobante.subido_por)
-        if subio is not None:
-            notificar(
-                db,
-                subio,
-                TipoNotificacion.COMPROBANTE_RECHAZADO,
-                "Comprobante rechazado",
-                observacion,
-                deuda_id=una_deuda,
-                clave_evento=f"comprobante_rechazado:{comprobante.id}",
-                ahora=ahora,
-            )
-    else:
-        gerente = db.get(Usuario, comprobante.gerente_id)
-        if gerente is not None:
-            notificar(
-                db,
-                gerente,
-                TipoNotificacion.COMPROBANTE_EN_REVISION,
-                "Comprobante por revisar",
-                observacion,
-                deuda_id=una_deuda,
-                clave_evento=f"comprobante_en_revision:{comprobante.id}",
-                ahora=ahora,
-            )
-    publicar_resultado(db, comprobante, deudas)
+    avisar(db, comprobante, deudas, ahora)
 
 
 def guardar_datos(comprobante: Comprobante, datos: DatosComprobante) -> None:
@@ -282,9 +283,77 @@ def aplicar_lectura(
     if datos.faltantes:
         mensaje = explicar_faltantes(datos.faltantes)
         resolver(db, comprobante, "en_revision", None, mensaje, momento)
-    else:
-        resolver(db, comprobante, "en_revision", None, MENSAJE_SIN_REGLAS, momento)
+        return True
+    decision = evaluar(
+        datos, comprobante.moneda, reparto_para_reglas(db, comprobante), comprobante.creado_en
+    )
+    observacion = decision.observacion
+    if decision.motivo == "otra_deuda":
+        assert datos.codigo is not None
+        sugerida = deuda_sugerida(db, comprobante, datos.codigo.valor)
+        if sugerida is not None:
+            comprobante.deuda_sugerida_id = sugerida
+            observacion = (
+                f"El comprobante parece ser de {describir_deuda(db, sugerida)}. Adjúntalo en esa "
+                "deuda y sube aquí el comprobante correcto."
+            )
+    resolver(
+        db, comprobante, decision.estado, decision.motivo, observacion, momento, decision.aplicados
+    )
     return True
+
+
+def reparto_para_reglas(db: Session, comprobante: Comprobante) -> list[DeudaReparto]:
+    filas = db.execute(
+        select(
+            Deuda.id,
+            Deuda.moneda,
+            Deuda.fecha_emision,
+            Deuda.periodo,
+            ComprobanteDeuda.monto_aplicado,
+            Servicio.codigo_suministro,
+            Servicio.empresa_nombre,
+            Servicio.alias,
+            Empresa.nombre,
+        )
+        .join(ComprobanteDeuda, ComprobanteDeuda.deuda_id == Deuda.id)
+        .join(Servicio, Servicio.id == Deuda.servicio_id)
+        .outerjoin(Empresa, Empresa.id == Servicio.empresa_id)
+        .where(ComprobanteDeuda.comprobante_id == comprobante.id)
+        .order_by(Deuda.id)
+    )
+    return [
+        DeudaReparto(
+            id=fila.id,
+            moneda=fila.moneda,
+            codigo=fila.codigo_suministro,
+            empresas=[e for e in (fila.nombre, fila.empresa_nombre, fila.alias) if e],
+            desde=fila.fecha_emision or fila.periodo,
+            monto_aplicado=fila.monto_aplicado,
+        )
+        for fila in filas
+    ]
+
+
+def deuda_sugerida(db: Session, comprobante: Comprobante, codigo: str) -> uuid.UUID | None:
+    """Deuda abierta del mismo gerente cuyo código coincide con el del comprobante, fuera de su
+    reparto. Nunca busca entre deudas de otro gerente (contrato H24, punto 5)."""
+    en_reparto = select(ComprobanteDeuda.deuda_id).where(
+        ComprobanteDeuda.comprobante_id == comprobante.id
+    )
+    codigo_servicio = func.upper(func.regexp_replace(Servicio.codigo_suministro, r"[\s-]", "", "g"))
+    return db.scalar(
+        select(Deuda.id)
+        .join(Servicio, Servicio.id == Deuda.servicio_id)
+        .where(
+            Deuda.gerente_id == comprobante.gerente_id,
+            Deuda.estado.not_in(ESTADOS_CERRADOS),
+            Deuda.id.not_in(en_reparto),
+            codigo_servicio == normalizar_codigo(codigo),
+        )
+        .order_by(Deuda.fecha_vencimiento, Deuda.id)
+        .limit(1)
+    )
 
 
 def sin_lectura(db: Session, comprobante: Comprobante, ahora: datetime | None = None) -> bool:

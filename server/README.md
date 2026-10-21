@@ -172,7 +172,9 @@ y la revisión programada los vuelve a encolar cuando el worker arranca.
 | Subida | `app/services/comprobantes.py` | Guarda el archivo y encola `procesar_comprobante` tras el commit |
 | Lectura | `app/ocr/motor.py` | PDF hasta 2 páginas a 200 ppp; imágenes reducidas a 2000 px; texto y confianza por línea |
 | Extracción | `app/ocr/extraccion.py` | Entidad por palabras clave (BCP, Interbank, BBVA, Scotiabank, Yape, Plin, Agente BCP y KasNet) y expresiones por entidad para operación, monto, moneda, fecha, empresa y código |
-| Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Operación ya usada en la misma entidad: rechazado por duplicado. Entidad desconocida o campo clave ausente: revisión. Datos completos: revisión hasta que existan las reglas (TASK-87) |
+| Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Operación ya usada en la misma entidad: rechazado por duplicado. Entidad desconocida o campo clave ausente: revisión |
+| Reglas | `app/services/reglas_comprobante.py` | Campo con confianza menor a 0,8, moneda o empresa distintas, o fecha dudosa: revisión. Código de otra deuda: rechazado, con la deuda propia que coincide como sugerencia. Monto igual (±0,10): validado; menor con una deuda: pago parcial; mayor: revisión |
+| Abonos | `app/services/abonos.py` | Con las deudas bloqueadas, vuelve a comprobar el saldo, aplica los abonos y deja la deuda pagada o pagada_parcial |
 | Avisos | `app/services/validacion.py` | Notificación y evento `comprobante_resultado` después del commit |
 | Recuperación | `recuperar_comprobantes`, cada 5 minutos | Vuelve a encolar lo que lleva 10 minutos en `procesando`; a la tercera vez lo deja en revisión |
 
