@@ -101,18 +101,21 @@ def test_la_asistente_sube_el_comprobante_de_su_pago(
     assert auditoria.detalle["deudas"] == [{"deuda_id": str(deuda.id), "monto_aplicado": "85.40"}]
 
 
-def test_el_gerente_adjunta_sin_iniciar_el_pago(
+def test_el_gerente_no_sube_vouchers(
     cliente: TestClient, db: Session, dos_gerentes: DosGerentes, s3: S3EnMemoria
 ) -> None:
+    """El voucher lo sube la asistente que pagó; el gerente lo valida (TASK-109)."""
     equipo = dos_gerentes.uno
-    deuda = nueva_deuda(db, equipo.gerente, estado="pagada_parcial")
+    for estado in ("pagada_parcial", "en_proceso"):
+        deuda = nueva_deuda(db, equipo.gerente, estado=estado)
 
-    r = subir(cliente, equipo.gerente, [{"deuda_id": str(deuda.id), "monto_aplicado": "40.00"}])
+        r = subir(cliente, equipo.gerente, [{"deuda_id": str(deuda.id)}])
 
-    assert r.status_code == 201, r.json()
-    db.refresh(deuda)
-    assert (deuda.estado, deuda.pago_iniciado_por) == ("por_validar", equipo.gerente.id)
-    assert deuda.pago_iniciado_en is not None
+        assert (r.status_code, r.json()["code"]) == (403, "SIN_PERMISO")
+        db.refresh(deuda)
+        assert (deuda.estado, deuda.pago_iniciado_por) == (estado, None)
+    assert s3.objetos == {}
+    assert contar_comprobantes(db) == 0
 
 
 def test_la_asistente_inicia_el_pago_antes_de_adjuntar(
@@ -135,7 +138,7 @@ def test_estados_cerrados_o_bloqueados_no_admiten_comprobantes(
     equipo = dos_gerentes.uno
     deuda = nueva_deuda(db, equipo.gerente, estado=estado)
 
-    r = subir(cliente, equipo.gerente, [{"deuda_id": str(deuda.id)}])
+    r = subir(cliente, equipo.asistente, [{"deuda_id": str(deuda.id)}])
 
     assert (r.status_code, r.json()["code"]) == (409, "ESTADO_NO_PERMITIDO")
     assert s3.objetos == {}

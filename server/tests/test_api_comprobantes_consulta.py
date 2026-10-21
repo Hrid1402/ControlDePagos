@@ -137,10 +137,22 @@ def test_un_comprobante_se_reemplaza_una_sola_vez(
     anterior = rechazado(cliente, db, equipo)
     assert reemplazar(cliente, equipo.asistente, anterior.id, pdf()).status_code == 201
 
-    r = reemplazar(cliente, equipo.gerente, anterior.id, imagen("JPEG"))
+    r = reemplazar(cliente, equipo.asistente, anterior.id, imagen("JPEG"))
 
     assert (r.status_code, r.json()["code"]) == (409, "YA_REEMPLAZADO")
     assert len(s3.objetos) == 2
+
+
+def test_el_gerente_no_reemplaza_vouchers(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes, s3: S3EnMemoria
+) -> None:
+    equipo = dos_gerentes.uno
+    anterior = rechazado(cliente, db, equipo)
+
+    r = reemplazar(cliente, equipo.gerente, anterior.id, pdf())
+
+    assert (r.status_code, r.json()["code"]) == (403, "SIN_PERMISO")
+    assert len(s3.objetos) == 1
 
 
 def test_solo_se_reemplaza_un_comprobante_rechazado(
