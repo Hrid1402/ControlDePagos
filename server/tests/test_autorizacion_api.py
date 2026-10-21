@@ -105,6 +105,14 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
         "gerente ajeno e id inexistente: "
         "test_api_comprobantes_consulta::test_el_comprobante_de_otro_gerente_responde_404"
     ),
+    ("POST", "/api/v1/comprobantes/{comprobante_id}/aprobar"): (
+        "asistente propia y gerente ajeno: test_api_revision_comprobantes::"
+        "test_la_asistente_no_revisa_y_otro_gerente_no_ve_el_comprobante"
+    ),
+    ("POST", "/api/v1/comprobantes/{comprobante_id}/rechazar"): (
+        "asistente propia y gerente ajeno: test_api_revision_comprobantes::"
+        "test_la_asistente_no_revisa_y_otro_gerente_no_ve_el_comprobante"
+    ),
     ("PUT", "/api/v1/comprobantes/{comprobante_id}/archivo"): (
         "asistente ajena: "
         "test_api_comprobantes_consulta::test_no_se_reemplaza_el_comprobante_de_otro_gerente"
