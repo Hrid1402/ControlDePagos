@@ -1,8 +1,9 @@
 """Esquemas del registro manual (H11, TASK-38) y del listado de deudas (H36, TASK-45).
 
 El periodo viaja como AAAA-MM y se guarda como el primer día de ese mes (ck_deuda_periodo).
-Aquí no se reciben fecha de emisión, campos de tarjeta o de préstamo (TASK-40) ni el recibo
-adjunto (TASK-84). Tampoco estado ni origen: el registro manual siempre crea una deuda pendiente.
+El registro acepta la fecha de emisión y, en una tarjeta, la fecha de corte y el pago mínimo; el
+monto es entonces el pago total (CA06). Los préstamos se registran con su cronograma en
+POST /prestamos (TASK-40). Ni estado ni origen: el registro manual crea una deuda pendiente.
 """
 
 import uuid
@@ -10,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal, get_args
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from app.core.paginacion import Pagina
 from app.schemas.bandeja import CategoriaBandeja
@@ -48,11 +49,86 @@ class DeudaEntrada(BaseModel):
     fecha_vencimiento: date
     periodo: Periodo | None = None
     numero_recibo: NumeroRecibo | None = None
+    fecha_emision: date | None = None
+    fecha_corte: date | None = None
+    pago_minimo: Monto | None = None
 
     @field_validator("numero_recibo")
     @classmethod
     def vacio_como_ausente(cls, valor: str | None) -> str | None:
         return valor or None
+
+    @model_validator(mode="after")
+    def fechas_y_minimo(self) -> "DeudaEntrada":
+        validar_fechas_y_minimo(
+            self.monto,
+            self.fecha_vencimiento,
+            self.fecha_emision,
+            self.fecha_corte,
+            self.pago_minimo,
+        )
+        return self
+
+
+def validar_fechas_y_minimo(
+    monto: Decimal | None,
+    vencimiento: date | None,
+    emision: date | None,
+    corte: date | None,
+    minimo: Decimal | None,
+) -> None:
+    """La emisión y el corte no son posteriores al vencimiento; el pago mínimo no supera el total.
+    Lanza ValueError, que Pydantic responde como 422 en el campo."""
+    if emision and vencimiento and emision > vencimiento:
+        raise ValueError("La emisión no puede ser posterior al vencimiento.")
+    if corte and vencimiento and corte > vencimiento:
+        raise ValueError("El corte no puede ser posterior a la fecha de pago.")
+    if minimo is not None and monto is not None and minimo > monto:
+        raise ValueError("El pago mínimo no puede superar al total.")
+
+
+class DeudaEdicion(BaseModel):
+    """Solo cambia lo que se envía. Confirmar el monto de una deuda que espera su recibo la deja
+    pendiente. Monto y moneda no cambian durante un pago en curso o en revisión (409)."""
+
+    monto: Monto | None = None
+    moneda: Moneda | None = None
+    fecha_vencimiento: date | None = None
+    fecha_emision: date | None = None
+    numero_recibo: NumeroRecibo | None = None
+    fecha_corte: date | None = None
+    pago_minimo: Monto | None = None
+
+
+class AnulacionEntrada(BaseModel):
+    motivo: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] | None = None
+
+
+class PrestamoEntrada(BaseModel):
+    """CA07: con el total, las cuotas y la primera fecha se genera el cronograma mensual."""
+
+    servicio_id: uuid.UUID
+    monto_total: Monto
+    cuotas_total: int = Field(ge=1, le=360)
+    fecha_primera_cuota: date
+    moneda: Moneda = "PEN"
+
+
+class CuotaSalida(BaseModel):
+    deuda_id: uuid.UUID
+    cuota_numero: int
+    fecha_vencimiento: date
+    monto: Decimal
+
+
+class PrestamoSalida(BaseModel):
+    id: uuid.UUID
+    servicio_id: uuid.UUID
+    monto_total: Decimal
+    cuotas_total: int
+    monto_cuota: Decimal
+    moneda: str
+    cuotas: list[CuotaSalida]
 
 
 class AdvertenciasDeuda(BaseModel):
