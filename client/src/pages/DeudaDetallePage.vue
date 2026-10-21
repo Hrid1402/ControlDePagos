@@ -18,7 +18,12 @@ import {
   listarComentarios,
   obtenerDeuda,
 } from '@/api/deudas'
-import { obtenerComprobante, subirComprobante } from '@/api/comprobantes'
+import {
+  aprobarComprobante,
+  obtenerComprobante,
+  rechazarComprobante,
+  subirComprobante,
+} from '@/api/comprobantes'
 import { useSesionStore } from '@/stores/sesion'
 import type { ErrorApi } from '@/types/api'
 
@@ -195,6 +200,45 @@ async function abrirComprobante(comprobanteId: string) {
   }
 }
 
+// El gerente valida o rechaza el voucher que subió la asistente (H24 CA07, TASK-109).
+const validando = ref<string | null>(null)
+const rechazando = ref<string | null>(null)
+const motivoRechazo = ref('')
+
+async function decidir(comprobanteId: string, trabajo: () => Promise<unknown>, aviso: string) {
+  validando.value = comprobanteId
+  try {
+    await trabajo()
+    toast.add({ severity: 'success', summary: aviso, life: 4000 })
+  } catch (fallo) {
+    avisarError(fallo)
+  } finally {
+    validando.value = null
+    await cargar(true)
+  }
+}
+
+function validarComprobante(comprobanteId: string) {
+  return decidir(comprobanteId, () => aprobarComprobante(comprobanteId), 'Pago validado')
+}
+
+function pedirRechazo(comprobanteId: string) {
+  motivoRechazo.value = ''
+  rechazando.value = comprobanteId
+}
+
+async function confirmarRechazo() {
+  const comprobanteId = rechazando.value
+  const texto = motivoRechazo.value.trim()
+  if (!comprobanteId || !texto) return
+  rechazando.value = null
+  await decidir(
+    comprobanteId,
+    () => rechazarComprobante(comprobanteId, texto),
+    'Voucher rechazado: la asistente recibe el motivo',
+  )
+}
+
 async function comentar(texto: string) {
   enviando.value = true
   errorComentario.value = null
@@ -229,6 +273,10 @@ function volver() {
     @accion="accion"
     @comentar="comentar"
     @abrir-comprobante="abrirComprobante"
+    :puede-validar="sesion.rol === 'gerente'"
+    :validando="validando"
+    @validar-comprobante="validarComprobante"
+    @rechazar-comprobante="pedirRechazo"
     @reintentar="cargar()"
   />
   <input
@@ -259,6 +307,28 @@ function volver() {
     <template #footer>
       <Button label="Volver" text @click="anulando = false" />
       <Button label="Anular deuda" severity="danger" @click="confirmarAnulacion" />
+    </template>
+  </Dialog>
+  <Dialog
+    :visible="!!rechazando"
+    modal
+    header="Rechazar el voucher"
+    :style="{ width: 'min(92vw, 460px)' }"
+    @update:visible="!$event && (rechazando = null)"
+  >
+    <p class="explica">
+      La asistente recibe el motivo y sube otro voucher. Este queda como historial.
+    </p>
+    <label for="motivo-rechazo" class="etiqueta">Motivo</label>
+    <textarea id="motivo-rechazo" v-model="motivoRechazo" rows="3" maxlength="500"></textarea>
+    <template #footer>
+      <Button label="Volver" text @click="rechazando = null" />
+      <Button
+        label="Rechazar voucher"
+        severity="danger"
+        :disabled="!motivoRechazo.trim()"
+        @click="confirmarRechazo"
+      />
     </template>
   </Dialog>
   <Dialog

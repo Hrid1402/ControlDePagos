@@ -24,6 +24,10 @@ const props = withDefaults(
     errorComentario?: string | null
     /** Acción en curso, para mostrar su botón cargando. */
     ocupado?: AccionDeuda | null
+    /** El gerente valida los vouchers por confirmar o en revisión (TASK-109). */
+    puedeValidar?: boolean
+    /** Voucher con una decisión en curso. */
+    validando?: string | null
   }>(),
   {
     detalle: null,
@@ -32,6 +36,8 @@ const props = withDefaults(
     enviandoComentario: false,
     errorComentario: null,
     ocupado: null,
+    puedeValidar: false,
+    validando: null,
   },
 )
 const emit = defineEmits<{
@@ -39,6 +45,8 @@ const emit = defineEmits<{
   accion: [accion: AccionDeuda]
   comentar: [texto: string]
   abrirComprobante: [id: string]
+  validarComprobante: [id: string]
+  rechazarComprobante: [id: string]
   reintentar: []
 }>()
 
@@ -272,8 +280,12 @@ const datos = computed(() => {
 
           <ComprobantesDeuda
             :comprobantes="d.comprobantes"
+            :puede-validar="puedeValidar"
+            :ocupado="validando"
             class="bloque orden-4"
             @abrir="emit('abrirComprobante', $event)"
+            @validar="emit('validarComprobante', $event)"
+            @rechazar="emit('rechazarComprobante', $event)"
           />
           <LineaTiempo :eventos="d.linea_tiempo" :moneda="d.moneda" class="bloque orden-7" />
         </div>
