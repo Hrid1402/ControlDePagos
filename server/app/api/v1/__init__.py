@@ -15,6 +15,7 @@ from app.api.v1 import (
     me,
     ordenes,
     pagos,
+    prestamos,
     servicios,
     solicitudes,
     tiempo_real,
@@ -38,6 +39,7 @@ router.include_router(limites.router)
 router.include_router(me.router)
 router.include_router(ordenes.router)
 router.include_router(pagos.router)
+router.include_router(prestamos.router)
 router.include_router(servicios.router)
 router.include_router(solicitudes.router)
 router.include_router(tiempo_real.router)

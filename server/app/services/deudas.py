@@ -150,6 +150,11 @@ def registrar_deuda(
         moneda=datos.moneda,
         fecha_vencimiento=datos.fecha_vencimiento,
         numero_recibo=datos.numero_recibo,
+        fecha_emision=datos.fecha_emision,
+        fecha_corte=datos.fecha_corte,
+        pago_minimo=datos.pago_minimo,
+        # En una tarjeta el monto registrado es el pago total del estado de cuenta (CA06).
+        pago_total=datos.monto if datos.fecha_corte else None,
         estado="pendiente",
         origen="manual",
         creado_por=usuario.id,

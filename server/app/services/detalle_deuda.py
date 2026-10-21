@@ -37,6 +37,7 @@ from app.models import (
 )
 from app.services.auditoria import nombre_de
 from app.services.comprobantes import ESTADOS_CON_INTENTO, ESTADOS_SIN_INTENTO, aplicado_en_curso
+from app.services.edicion_deudas import ESTADOS_EN_CURSO
 from app.services.linea_tiempo import Evento, linea_de_tiempo
 from app.services.pagos import acciones_de_pago
 from app.services.saldo import aplicado_de, aplicado_validado, proyeccion_sin_recibo, vencida
@@ -48,6 +49,8 @@ class AccionDeuda(StrEnum):
     INICIAR_PAGO = "iniciar_pago"
     CANCELAR_INICIO = "cancelar_inicio"
     ADJUNTAR_COMPROBANTE = "adjuntar_comprobante"
+    EDITAR = "editar"
+    ANULAR = "anular"
     COMENTAR = "comentar"
 
 
@@ -107,7 +110,9 @@ def historial_de(db: Session, deuda_id: uuid.UUID) -> list[CambioFila]:
     return [CambioFila(cambio, nombre_de(u) if u else None) for cambio, u in filas]
 
 
-def acciones_de(db: Session, deuda: Deuda, usuario: Usuario) -> list[AccionDeuda]:
+def acciones_de(
+    db: Session, deuda: Deuda, usuario: Usuario, orden_abierta: bool
+) -> list[AccionDeuda]:
     if deuda.estado == "anulada":
         return []
     acciones: list[AccionDeuda] = []
@@ -123,6 +128,16 @@ def acciones_de(db: Session, deuda: Deuda, usuario: Usuario) -> list[AccionDeuda
         disponible = deuda.monto - aplicado_de(db, deuda.id) - aplicado_en_curso(db, deuda.id)
         if disponible > 0:
             acciones.append(AccionDeuda.ADJUNTAR_COMPROBANTE)
+    if deuda.estado != "pagada":
+        acciones.append(AccionDeuda.EDITAR)
+    abonado = aplicado_de(db, deuda.id)
+    if (
+        usuario.rol == "gerente"
+        and deuda.estado not in ("pagada", *ESTADOS_EN_CURSO)
+        and abonado == 0
+        and not orden_abierta
+    ):
+        acciones.append(AccionDeuda.ANULAR)
     acciones.append(AccionDeuda.COMENTAR)
     return acciones
 
@@ -176,5 +191,5 @@ def obtener_detalle(
         comprobantes=comprobantes,
         historial=historial_de(db, deuda.id),
         linea_tiempo=linea_de_tiempo(db, deuda, [f.comprobante for f in comprobantes]),
-        acciones=acciones_de(db, deuda, usuario),
+        acciones=acciones_de(db, deuda, usuario, orden is not None),
     )

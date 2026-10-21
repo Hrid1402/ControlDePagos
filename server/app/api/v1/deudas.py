@@ -7,6 +7,8 @@ una deuda activa del servicio en ese periodo). Una deuda vencida se registra con
 Errores del listado: 404 NO_ENCONTRADO (categoría o servicio ajeno o inexistente), 403
 SIN_PERMISO y 422 VALIDACION con el parámetro en field.
 Detalle (H17, TASK-53): 404 NO_ENCONTRADO si la deuda no existe o es de otro gerente.
+Edición y anulación (TASK-40): responden el detalle actualizado. 409 ESTADO_NO_PERMITIDO (pagada
+o anulada), PAGO_EN_CURSO, CON_ABONOS u ORDEN_ABIERTA; anular es solo del gerente (403).
 """
 
 import uuid
@@ -15,7 +17,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.core.dependencias import GerenteId, OrigenSolicitud, SesionDb, UsuarioActual
+from app.core.dependencias import (
+    GerenteId,
+    OrigenSolicitud,
+    SesionDb,
+    SoloGerente,
+    UsuarioActual,
+)
 from app.core.errores import ErrorApi
 from app.core.paginacion import ParametrosPagina
 from app.schemas.bandeja import CategoriaBandeja, EnProcesoBandeja, OrdenUrgenteBandeja
@@ -30,6 +38,8 @@ from app.schemas.detalle_deuda import (
 from app.schemas.deudas import (
     ESTADOS_DEUDA,
     AdvertenciasDeuda,
+    AnulacionEntrada,
+    DeudaEdicion,
     DeudaEntrada,
     DeudaRegistradaSalida,
     ItemDeuda,
@@ -49,6 +59,7 @@ from app.services.deudas import (
     registrar_deuda,
     texto_periodo,
 )
+from app.services.edicion_deudas import anular_deuda, editar_deuda
 
 router = APIRouter(prefix="/deudas", tags=["deudas"])
 
@@ -248,3 +259,29 @@ def detalle_salida(detalle: DetalleDeuda) -> DetalleDeudaSalida:
 def ver(deuda_id: uuid.UUID, db: SesionDb, usuario: UsuarioActual) -> DetalleDeudaSalida:
     """Detalle de la deuda con sus comprobantes, historial, línea de tiempo y acciones."""
     return detalle_salida(obtener_detalle(db, usuario, deuda_id))
+
+
+@router.put("/{deuda_id}")
+def editar(
+    deuda_id: uuid.UUID,
+    datos: DeudaEdicion,
+    db: SesionDb,
+    usuario: UsuarioActual,
+    origen: OrigenSolicitud,
+) -> DetalleDeudaSalida:
+    editar_deuda(db, usuario, deuda_id, datos, origen=origen)
+    db.commit()
+    return detalle_salida(obtener_detalle(db, usuario, deuda_id))
+
+
+@router.post("/{deuda_id}/anular")
+def anular(
+    deuda_id: uuid.UUID,
+    db: SesionDb,
+    gerente: SoloGerente,
+    origen: OrigenSolicitud,
+    entrada: AnulacionEntrada | None = None,
+) -> DetalleDeudaSalida:
+    anular_deuda(db, gerente, deuda_id, entrada.motivo if entrada else None, origen=origen)
+    db.commit()
+    return detalle_salida(obtener_detalle(db, gerente, deuda_id))
