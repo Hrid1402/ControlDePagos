@@ -100,49 +100,6 @@ const seleccionable = computed(
       >
         <i class="pi pi-file" aria-hidden="true"></i> {{ COMPROBANTES[item.comprobante_estado] }}
       </p>
-
-      <div class="acciones">
-        <Button
-          v-if="pestana === 'por_pagar' && !pagaOtro && item.monto !== null"
-          label="Modo ventanilla"
-          icon="pi pi-qrcode"
-          size="small"
-          :disabled="ocupada"
-          @click="emit('ventanilla')"
-        />
-        <Button
-          v-if="pestana !== 'por_validar' && !pagaOtro && item.monto !== null"
-          label="Adjuntar comprobante"
-          icon="pi pi-paperclip"
-          size="small"
-          :outlined="pestana === 'por_pagar'"
-          :disabled="ocupada"
-          @click="emit('adjuntar')"
-        />
-        <span class="secundarias">
-          <button
-            type="button"
-            class="icono-boton"
-            :aria-pressed="item.fijada"
-            :aria-label="item.fijada ? `Quitar ${nombre} de fijadas` : `Fijar ${nombre} arriba`"
-            :title="item.fijada ? 'Quitar de fijadas' : 'Fijar arriba'"
-            :disabled="ocupada"
-            @click="emit('fijar', !item.fijada)"
-          >
-            <i class="pi pi-thumbtack" aria-hidden="true"></i>
-          </button>
-          <button
-            v-if="!item.orden_urgente"
-            type="button"
-            class="icono-boton texto"
-            :aria-label="`Recordar ${nombre} mañana`"
-            :disabled="ocupada"
-            @click="emit('posponer')"
-          >
-            <i class="pi pi-moon" aria-hidden="true"></i> Mañana
-          </button>
-        </span>
-      </div>
     </div>
 
     <div class="monto">
@@ -153,6 +110,49 @@ const seleccionable = computed(
         </span>
       </template>
       <span v-else class="por-confirmar">Espera recibo</span>
+    </div>
+
+    <div class="acciones">
+      <Button
+        v-if="pestana === 'por_pagar' && !pagaOtro && item.monto !== null"
+        label="Modo ventanilla"
+        icon="pi pi-qrcode"
+        size="small"
+        :disabled="ocupada"
+        @click="emit('ventanilla')"
+      />
+      <Button
+        v-if="pestana !== 'por_validar' && !pagaOtro && item.monto !== null"
+        label="Adjuntar comprobante"
+        icon="pi pi-paperclip"
+        size="small"
+        :outlined="pestana === 'por_pagar'"
+        :disabled="ocupada"
+        @click="emit('adjuntar')"
+      />
+      <span class="secundarias">
+        <button
+          v-if="!item.orden_urgente"
+          type="button"
+          class="icono-boton texto"
+          :aria-label="`Recordar ${nombre} mañana`"
+          :disabled="ocupada"
+          @click="emit('posponer')"
+        >
+          <i class="pi pi-moon" aria-hidden="true"></i> Mañana
+        </button>
+        <button
+          type="button"
+          class="icono-boton"
+          :aria-pressed="item.fijada"
+          :aria-label="item.fijada ? `Quitar ${nombre} de fijadas` : `Fijar ${nombre} arriba`"
+          :title="item.fijada ? 'Quitar de fijadas' : 'Fijar arriba'"
+          :disabled="ocupada"
+          @click="emit('fijar', !item.fijada)"
+        >
+          <i class="pi pi-thumbtack" aria-hidden="true"></i>
+        </button>
+      </span>
     </div>
   </article>
 </template>
@@ -314,12 +314,14 @@ const seleccionable = computed(
 .comprobante.rechazado {
   color: var(--deconsta-error);
 }
+/* Fila propia a lo ancho de la tarjeta: las secundarias quedan siempre en el borde derecho,
+   sin importar el ancho del monto. */
 .acciones {
   display: flex;
+  grid-column: 2 / -1;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
 }
 .secundarias {
   display: inline-flex;
@@ -389,6 +391,10 @@ input:focus-visible {
   .cuerpo {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+  .acciones {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
   .casilla {
     grid-row: 1;
