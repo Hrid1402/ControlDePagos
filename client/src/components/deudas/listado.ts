@@ -120,3 +120,32 @@ export const hayFiltros = (f: FiltrosDeudas) =>
 
 /** «Hidrandina» o «Luz de la casa» con la empresa debajo. */
 export const nombreDeuda = (d: Pick<ItemDeuda, 'alias' | 'empresa'>) => d.alias || d.empresa
+
+const VISTAS_VALIDAS = new Set(VISTAS.map((v) => v.valor))
+const ORDENES_VALIDOS = new Set(ORDENES.map((o) => o.valor))
+const texto = (valor: unknown) => (typeof valor === 'string' ? valor : '')
+
+/** Filtros desde la URL (CA09 y CA13): un valor desconocido vuelve al de por defecto. */
+export function filtrosDeQuery(query: Record<string, unknown>): FiltrosDeudas {
+  const vista = texto(query.vista) as Vista
+  const orden = texto(query.orden) as Orden
+  const mes = texto(query.mes)
+  const page = Number.parseInt(texto(query.page), 10)
+  return {
+    q: texto(query.q),
+    vista: VISTAS_VALIDAS.has(vista) ? vista : FILTROS_INICIALES.vista,
+    categoria: texto(query.categoria),
+    mes: /^\d{4}-\d{2}$/.test(mes) ? mes : '',
+    orden: ORDENES_VALIDOS.has(orden) ? orden : FILTROS_INICIALES.orden,
+    page: page > 0 ? page : 1,
+  }
+}
+
+/** La URL guarda solo lo que difiere de los filtros por defecto. */
+export function queryDeFiltros(f: FiltrosDeudas): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(f)
+      .filter(([clave, valor]) => valor !== FILTROS_INICIALES[clave as keyof FiltrosDeudas])
+      .map(([clave, valor]) => [clave, String(valor)]),
+  )
+}
