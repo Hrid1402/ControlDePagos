@@ -112,6 +112,10 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
         "asistente ajena: test_api_comentarios::"
         "test_anulada_no_admite_comentarios_y_otro_gerente_no_los_ve"
     ),
+    ("GET", "/api/v1/servicios/{servicio_id}/recurrencia"): (
+        "gerente ajeno: test_recurrencias::test_configurar_la_recurrencia_de_un_servicio"
+    ),
+    ("PUT", "/api/v1/servicios/{servicio_id}/recurrencia"): "MATRIZ",
     ("PUT", "/api/v1/deudas/{deuda_id}"): "MATRIZ",
     ("POST", "/api/v1/deudas/{deuda_id}/anular"): "MATRIZ",
     # Comprobantes (TASK-84): probadas en sus archivos.
@@ -233,6 +237,14 @@ MATRIZ = [
         servicio_del_otro_equipo,
     ),
     Caso("POST", "/api/v1/servicios/{servicio_id}/baja", "asistente_ajena", SIN_PERMISO, servicio),
+    Caso(
+        "PUT",
+        "/api/v1/servicios/{servicio_id}/recurrencia",
+        "asistente_ajena",
+        NO_ENCONTRADO,
+        servicio,
+        lambda db, equipos: {"dia_vencimiento": 10},
+    ),
     Caso(
         "POST",
         "/api/v1/servicios/{servicio_id}/reactivar",
