@@ -4,7 +4,8 @@ El gerente aprueba o rechaza con un clic un comprobante en revisión. Todo en un
 el comprobante y sus deudas bloqueados (el mismo orden que el worker de OCR):
 
 - Aprobar aplica los abonos con el servicio común (app/services/abonos.py), que vuelve a
-  comprobar el saldo. Sin reparto, aplica el reparto confirmado al subir. Con reparto, el gerente
+  comprobar el saldo. Sin reparto, aplica lo que propuso la validación si el voucher quedó por
+  confirmar (TASK-109) o, si no, el reparto confirmado al subir. Con reparto, el gerente
   lo corrige para las mismas deudas: así se resuelve un monto mayor o un monto menor entre varias
   deudas. Ningún abono supera el saldo de su deuda y, si se leyó el monto del comprobante, la
   suma no lo supera (contrato H24, punto 2).
@@ -51,6 +52,10 @@ def abonos_de(
 ) -> dict[uuid.UUID, Decimal]:
     actuales = {r.deuda_id: r.monto_aplicado for r in repartos_de(db, comprobante.id)}
     if entradas is None:
+        # Por confirmar trae lo que leyó la validación, por ejemplo un pago parcial (TASK-109).
+        propuestos = comprobante.datos_extraidos.get("abonos_propuestos") or {}
+        if propuestos and set(propuestos) == {str(d) for d in actuales}:
+            return {uuid.UUID(k): Decimal(v) for k, v in propuestos.items()}
         return actuales
     if {e.deuda_id for e in entradas} != set(actuales) or len(entradas) != len(actuales):
         raise ErrorApi(

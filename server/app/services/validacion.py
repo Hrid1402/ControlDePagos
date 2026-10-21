@@ -10,15 +10,18 @@ comprobante bloqueado. Este módulo decide el resultado y lo aplica en la misma 
   mensaje es genérico (contrato H24, punto 5).
 - Entidad no admitida o algún campo clave ausente: revisión del gerente con la explicación.
 - Con los datos completos deciden las reglas documentales (app/services/reglas_comprobante.py):
-  validado (completo o pago parcial), en revisión o rechazado por otra_deuda, con la deuda que
-  parece corresponder como sugerencia. El validado aplica sus abonos (app/services/abonos.py).
+  coincide (completo o pago parcial), en revisión o rechazado por otra_deuda, con la deuda que
+  parece corresponder como sugerencia.
+- Lo que coincide no se valida solo: queda por_confirmar con los abonos propuestos y el gerente
+  lo valida o rechaza con un clic (TASK-109). Sus abonos se aplican al aprobarlo.
 - Si la lectura falla tras sus reintentos, sin_lectura lo deja en revisión con la explicación:
   el registro se conserva y el gerente decide.
 
 Al resolver: el rechazado devuelve sus deudas a en_proceso (salvo que otro comprobante activo
-siga cubriéndolas) para adjuntar otro o reemplazarlo; en revisión las deja en por_validar. Avisa
-con una notificación (quien subió si se rechaza, el gerente si queda en revisión) y con el evento
-comprobante_resultado a ambos. Todo sale después del commit.
+siga cubriéndolas) para adjuntar otro o reemplazarlo; en revisión o por confirmar las deja en
+por_validar. Avisa con una notificación (quien subió si se rechaza, el gerente si queda en
+revisión o por confirmar) y con el evento comprobante_resultado a ambos. Todo sale después del
+commit.
 
 Idempotencia: solo se resuelve un comprobante en procesando. Repetir la tarea o la recuperación
 programada no cambia un resultado ya aplicado.
@@ -37,9 +40,10 @@ from app.models import Comprobante, ComprobanteDeuda, Deuda, Empresa, Servicio, 
 from app.ocr.extraccion import CampoClave, DatosComprobante, Entidad, extraer
 from app.ocr.motor import LecturaOcr
 from app.services.abonos import aplicar_abonos, otro_activo
+from app.services.auditoria import nombre_de
 from app.services.notificaciones import TipoNotificacion, notificar
 from app.services.reglas_comprobante import DeudaReparto, evaluar, normalizar_codigo
-from app.services.saldo import ESTADOS_CERRADOS
+from app.services.saldo import ESTADOS_CERRADOS, aplicado_de
 
 UMBRAL_ILEGIBLE = 0.6
 # El texto completo de un comprobante cabe de sobra; el límite evita guardar basura de un PDF.
@@ -76,6 +80,11 @@ def bloquear_comprobante(db: Session, comprobante_id: uuid.UUID) -> Comprobante 
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+
+
+SALDO_CUBIERTO = (
+    "Otro comprobante ya cubrió parte de la deuda y este supera su saldo: lo revisa el gerente."
+)
 
 
 def deudas_de(db: Session, comprobante: Comprobante) -> list[Deuda]:
@@ -128,6 +137,10 @@ def avisar(db: Session, comprobante: Comprobante, deudas: list[Deuda], ahora: da
     elif comprobante.estado == "en_revision":
         destinatario = db.get(Usuario, comprobante.gerente_id)
         tipo, titulo = TipoNotificacion.COMPROBANTE_EN_REVISION, "Comprobante por revisar"
+    elif comprobante.estado == "por_confirmar":
+        destinatario = db.get(Usuario, comprobante.gerente_id)
+        tipo, titulo = TipoNotificacion.COMPROBANTE_EN_REVISION, "Voucher por validar"
+        observacion = aviso_por_confirmar(db, comprobante, deudas)
     else:
         destinatario = None
     if destinatario is not None:
@@ -142,6 +155,14 @@ def avisar(db: Session, comprobante: Comprobante, deudas: list[Deuda], ahora: da
             ahora=ahora,
         )
     publicar_resultado(db, comprobante, deudas)
+
+
+def aviso_por_confirmar(db: Session, comprobante: Comprobante, deudas: list[Deuda]) -> str:
+    """Qué tiene que validar el gerente: quién subió el voucher y de qué deuda."""
+    subidor = db.get(Usuario, comprobante.subido_por)
+    quien = nombre_de(subidor) if subidor is not None else "La asistente"
+    de = describir_deuda(db, deudas[0].id) if len(deudas) == 1 else f"{len(deudas)} deudas"
+    return f"{quien} subió el voucher de {de}. Revísalo y valídalo."
 
 
 def resolver(
@@ -163,11 +184,7 @@ def resolver(
         assert aplicados is not None
         sin_saldo = aplicar_abonos(db, comprobante, deudas, aplicados, ahora)
         if sin_saldo is not None:
-            estado, motivo = "en_revision", "monto_mayor"
-            observacion = (
-                "Otro comprobante ya cubrió parte de la deuda y este supera su saldo: lo revisa "
-                "el gerente."
-            )
+            estado, motivo, observacion = "en_revision", "monto_mayor", SALDO_CUBIERTO
     comprobante.estado = estado
     comprobante.motivo_codigo = motivo
     comprobante.datos_extraidos = {**comprobante.datos_extraidos, "observacion": observacion}
@@ -297,10 +314,41 @@ def aplicar_lectura(
                 f"El comprobante parece ser de {describir_deuda(db, sugerida)}. Adjúntalo en esa "
                 "deuda y sube aquí el comprobante correcto."
             )
-    resolver(
-        db, comprobante, decision.estado, decision.motivo, observacion, momento, decision.aplicados
-    )
+    if decision.estado == "validado":
+        proponer(db, comprobante, decision.motivo, decision.aplicados, momento)
+        return True
+    resolver(db, comprobante, decision.estado, decision.motivo, observacion, momento)
     return True
+
+
+def proponer(
+    db: Session,
+    comprobante: Comprobante,
+    motivo: str | None,
+    aplicados: dict[uuid.UUID, Decimal],
+    ahora: datetime,
+) -> None:
+    """La lectura coincide: queda por confirmar con los abonos que aplicaría la validación. El
+    gerente los aplica al aprobar (app/services/revision_comprobantes.py). Si otro comprobante ya
+    cubrió parte del saldo, va a revisión como antes: el gerente corrige el reparto."""
+    for deuda in deudas_de(db, comprobante):
+        assert deuda.monto is not None, f"La deuda {deuda.id} por validar no tiene monto"
+        if aplicados[deuda.id] > deuda.monto - aplicado_de(db, deuda.id):
+            resolver(db, comprobante, "en_revision", "monto_mayor", SALDO_CUBIERTO, ahora)
+            return
+    comprobante.datos_extraidos = {
+        **comprobante.datos_extraidos,
+        "abonos_propuestos": {str(deuda_id): str(monto) for deuda_id, monto in aplicados.items()},
+    }
+    total = sum(aplicados.values(), Decimal(0))
+    if motivo == "monto_menor":
+        observacion = (
+            f"Pago parcial de {comprobante.moneda} {total}: cuando el gerente lo valide, la deuda "
+            "queda con saldo pendiente."
+        )
+    else:
+        observacion = "El voucher coincide con la deuda. Falta que el gerente lo valide."
+    resolver(db, comprobante, "por_confirmar", motivo, observacion, ahora)
 
 
 def reparto_para_reglas(db: Session, comprobante: Comprobante) -> list[DeudaReparto]:
