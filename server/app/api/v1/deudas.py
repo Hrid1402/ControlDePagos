@@ -5,7 +5,8 @@ Errores del registro: 404 NO_ENCONTRADO (servicio inexistente, eliminado o de ot
 SIN_PERMISO, 422 VALIDACION, 409 SERVICIO_DE_BAJA y 409 DUPLICADO con deuda_existente (ya hay
 una deuda activa del servicio en ese periodo). Una deuda vencida se registra con la advertencia.
 Errores del listado: 404 NO_ENCONTRADO (categoría o servicio ajeno o inexistente), 403
-SIN_PERMISO y 422 VALIDACION con el parámetro en field. El detalle es de TASK-53.
+SIN_PERMISO y 422 VALIDACION con el parámetro en field.
+Detalle (H17, TASK-53): 404 NO_ENCONTRADO si la deuda no existe o es de otro gerente.
 """
 
 import uuid
@@ -17,7 +18,15 @@ from fastapi import APIRouter, Depends, Query, status
 from app.core.dependencias import GerenteId, OrigenSolicitud, SesionDb, UsuarioActual
 from app.core.errores import ErrorApi
 from app.core.paginacion import ParametrosPagina
-from app.schemas.bandeja import CategoriaBandeja
+from app.schemas.bandeja import CategoriaBandeja, EnProcesoBandeja, OrdenUrgenteBandeja
+from app.schemas.detalle_deuda import (
+    Actor,
+    CambioMonto,
+    ComprobanteDeLaDeuda,
+    DetalleDeudaSalida,
+    EventoDeuda,
+    ServicioDetalle,
+)
 from app.schemas.deudas import (
     ESTADOS_DEUDA,
     AdvertenciasDeuda,
@@ -29,6 +38,9 @@ from app.schemas.deudas import (
     OrdenListado,
     Periodo,
 )
+from app.services.archivos import enlace_firmado
+from app.services.auditoria import nombre_de
+from app.services.detalle_deuda import DetalleDeuda, obtener_detalle
 from app.services.deudas import (
     FilaDeuda,
     FiltrosDeudas,
@@ -142,3 +154,97 @@ def registrar(
         creado_en=deuda.creado_en,
         advertencias=AdvertenciasDeuda(vencida=registro.vencida),
     )
+
+
+def detalle_salida(detalle: DetalleDeuda) -> DetalleDeudaSalida:
+    deuda, servicio = detalle.deuda, detalle.servicio
+    iniciador, orden = detalle.iniciador, detalle.orden
+    return DetalleDeudaSalida(
+        id=deuda.id,
+        servicio=ServicioDetalle(
+            id=servicio.id,
+            empresa=detalle.empresa,
+            alias=servicio.alias,
+            codigo_suministro=servicio.codigo_suministro,
+            titular=servicio.titular,
+            lugar_pago=servicio.lugar_pago,
+            notas=servicio.notas,
+        ),
+        categoria=CategoriaBandeja.model_validate(detalle.categoria, from_attributes=True),
+        periodo=texto_periodo(deuda.periodo),
+        estado=deuda.estado,
+        origen=deuda.origen,
+        moneda=deuda.moneda,
+        monto=deuda.monto,
+        pagado=detalle.pagado,
+        saldo=detalle.saldo,
+        monto_proyectado=detalle.proyeccion,
+        vencida=detalle.vencida,
+        fecha_emision=deuda.fecha_emision,
+        fecha_vencimiento=deuda.fecha_vencimiento,
+        fecha_estimada=deuda.fecha_estimada,
+        fecha_corte=deuda.fecha_corte,
+        pago_minimo=deuda.pago_minimo,
+        pago_total=deuda.pago_total,
+        numero_recibo=deuda.numero_recibo,
+        recibo_enlace=enlace_firmado(deuda.recibo_url) if deuda.recibo_url else None,
+        cuota_numero=deuda.cuota_numero,
+        cuotas_total=detalle.cuotas_total,
+        en_proceso=(
+            EnProcesoBandeja(
+                usuario_id=iniciador.id,
+                rol=iniciador.rol,
+                nombre=nombre_de(iniciador),
+                desde=deuda.pago_iniciado_en,
+            )
+            if iniciador is not None
+            else None
+        ),
+        orden_urgente=(
+            OrdenUrgenteBandeja(id=orden.id, estado=orden.estado, plazo=orden.plazo)
+            if orden is not None
+            else None
+        ),
+        creado_en=deuda.creado_en,
+        comprobantes=[
+            ComprobanteDeLaDeuda(
+                id=f.comprobante.id,
+                estado=f.comprobante.estado,
+                motivo_codigo=f.comprobante.motivo_codigo,
+                observacion=f.comprobante.datos_extraidos.get("observacion"),
+                monto=f.comprobante.monto,
+                monto_aplicado=f.monto_aplicado,
+                moneda=f.comprobante.moneda,
+                subido_por=f.subido_por,
+                creado_en=f.comprobante.creado_en,
+                reemplaza_a_id=f.comprobante.reemplaza_a_id,
+            )
+            for f in detalle.comprobantes
+        ],
+        historial_montos=[
+            CambioMonto(
+                monto_anterior=f.cambio.monto_anterior,
+                monto_nuevo=f.cambio.monto_nuevo,
+                origen=f.cambio.origen,
+                usuario=f.usuario,
+                creado_en=f.cambio.creado_en,
+            )
+            for f in detalle.historial
+        ],
+        linea_tiempo=[
+            EventoDeuda(
+                tipo=e.tipo,
+                fecha=e.fecha,
+                actor=Actor(nombre=e.actor[0], rol=e.actor[1]) if e.actor else None,
+                detalle=e.detalle,
+            )
+            for e in detalle.linea_tiempo
+        ],
+        acciones=[a.value for a in detalle.acciones],
+    )
+
+
+@router.get("/{deuda_id}")
+def ver(deuda_id: uuid.UUID, db: SesionDb, usuario: UsuarioActual) -> DetalleDeudaSalida:
+    """Detalle de la deuda con sus comprobantes, historial, línea de tiempo y acciones."""
+    return detalle_salida(obtener_detalle(db, usuario, deuda_id))
