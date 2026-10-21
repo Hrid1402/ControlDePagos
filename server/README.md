@@ -121,6 +121,7 @@ misma configuración que la API (`DATABASE_URL`). No necesitan variables de ento
 | `app/workers/encolar.py` | Encolar una tarea solo si la transacción se confirma |
 | `app/workers/latido.py` | Latido: job de ejemplo que comprueba que todo responde |
 | `app/workers/aprobaciones.py` | Recordatorios de solicitudes de aprobación pendientes (H05) |
+| `app/workers/recurrencias.py` | Deudas recurrentes y recibos retrasados, cada día a las 00:05 (H11) |
 | `app/workers/comprobantes.py` | Validación de comprobantes en la cola `ocr` y su recuperación (H24) |
 
 ### Arranque local
