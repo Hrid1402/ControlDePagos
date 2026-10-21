@@ -143,7 +143,7 @@ describe('reglas del formulario de deuda', () => {
     expect(errores({ ...base, recibo: archivo('application/pdf') })).toEqual([])
     expect(errores({ ...base, recibo: archivo('image/png') })).toEqual([])
     expect(errores({ ...base, recibo: archivo('text/plain') })).toEqual([
-      'recibo: Adjunta un PDF o una imagen (JPG, PNG o WebP).',
+      'recibo: Adjunta un PDF o una imagen JPG o PNG.',
     ])
     const grande = archivo('application/pdf')
     Object.defineProperty(grande, 'size', { value: 11 * 1024 * 1024 })

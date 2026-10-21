@@ -49,7 +49,7 @@ const peso = (bytes: number) =>
         ref="entrada"
         type="file"
         name="recibo"
-        accept="application/pdf,image/jpeg,image/png,image/webp"
+        accept="application/pdf,image/jpeg,image/png"
         :aria-labelledby="`${id}-etiqueta`"
         :aria-describedby="errorMessage ? `${id}-error` : `${id}-ayuda`"
         @change="elegir(($event.target as HTMLInputElement).files)"
