@@ -21,7 +21,14 @@ from app.schemas.ruta import (
     RutaSalida,
     TotalesRuta,
 )
-from app.services.ruta import FilaRuta, consultar_ruta, iniciar_ruta, total_iniciado, totales_de
+from app.services.ruta import (
+    ESTADOS_EN_RUTA,
+    FilaRuta,
+    consultar_ruta,
+    iniciar_ruta,
+    total_iniciado,
+    totales_de,
+)
 
 router = APIRouter(prefix="/ruta", tags=["ruta"])
 
@@ -40,7 +47,7 @@ def item_salida(fila: FilaRuta, usuario_id: uuid.UUID) -> ItemRuta:
         moneda=deuda.moneda,
         estado=deuda.estado,
         fecha_vencimiento=deuda.fecha_vencimiento,
-        en_ruta=deuda.estado == "en_proceso" and deuda.pago_iniciado_por == usuario_id,
+        en_ruta=deuda.estado in ESTADOS_EN_RUTA and deuda.pago_iniciado_por == usuario_id,
         pago_realizado=deuda.pago_realizado,
         pago_realizado_en=deuda.pago_realizado_en,
         comprobante_estado=fila.comprobante_estado,
