@@ -13,7 +13,7 @@ from app.core.seguridad import crear_token
 from app.core.tiempo import ahora_lima, zona_horaria
 from app.main import app
 from app.models import Auditoria, Servicio, Usuario
-from tests.conftest import DosGerentes, nueva_categoria, nueva_deuda, nueva_orden
+from tests.conftest import DosGerentes, en_proceso_por, nueva_categoria, nueva_deuda, nueva_orden
 
 HOY = ahora_lima().date()
 
@@ -104,9 +104,12 @@ def test_en_proceso_indica_si_paga_el_gerente_o_la_asistente(
     equipo.gerente.nombres, equipo.gerente.apellidos = "Ana", "Ríos"
     de_gerente = nueva_deuda(db, equipo.gerente, fecha_vencimiento=HOY)
     de_asistente = nueva_deuda(db, equipo.gerente, fecha_vencimiento=HOY + timedelta(days=1))
-    for usuario, deuda in ((equipo.gerente, de_gerente), (equipo.asistente, de_asistente)):
-        r = cliente.post(f"/api/v1/deudas/{deuda.id}/iniciar-pago", headers=cabecera(usuario))
-        assert r.json()["resultado"] == "iniciado"
+    # El gerente ya no inicia pagos (TASK-109); un intento suyo anterior se sigue mostrando.
+    en_proceso_por(db, de_gerente, equipo.gerente)
+    r = cliente.post(
+        f"/api/v1/deudas/{de_asistente.id}/iniciar-pago", headers=cabecera(equipo.asistente)
+    )
+    assert r.json()["resultado"] == "iniciado"
 
     items = ver(cliente, equipo.asistente)["items"]
 

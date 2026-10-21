@@ -1,8 +1,9 @@
 """Comprobantes de pago (H24): subida, consulta y reemplazo del archivo.
 
-La asistente y el gerente adjuntan comprobantes de las deudas del gerente (CA09). El archivo va
-en multipart: archivo y deudas, una lista JSON de {deuda_id, monto_aplicado}. Solo el gerente
-aprueba o rechaza un comprobante en revisión (CA07); la asistente recibe 403 SIN_PERMISO.
+Solo la asistente sube o reemplaza el voucher de un pago (TASK-109; el gerente recibe 403
+SIN_PERMISO). El archivo va en multipart: archivo y deudas, una lista JSON de {deuda_id,
+monto_aplicado}. Solo el gerente aprueba o rechaza un comprobante en revisión o por confirmar
+(CA07); la asistente recibe 403 SIN_PERMISO.
 
 Errores: 404 NO_ENCONTRADO (comprobante o deuda inexistente o de otro gerente), 422 VALIDACION o
 MONEDA_DISTINTA, 409 DUPLICADO, SIN_INTENTO, ESTADO_NO_PERMITIDO, SIN_SALDO o YA_REEMPLAZADO y
@@ -19,8 +20,8 @@ from app.core.dependencias import (
     GerenteId,
     OrigenSolicitud,
     SesionDb,
+    SoloAsistente,
     SoloGerente,
-    UsuarioActual,
 )
 from app.core.errores import ErrorApi
 from app.models import Comprobante
@@ -93,7 +94,7 @@ def subir(
     archivo: Annotated[UploadFile, File()],
     deudas: Annotated[str, Form()],
     db: SesionDb,
-    usuario: UsuarioActual,
+    usuario: SoloAsistente,
     gerente_id: GerenteId,
     origen: OrigenSolicitud,
 ) -> ComprobanteSalida:
@@ -114,7 +115,7 @@ def reemplazar(
     comprobante_id: uuid.UUID,
     archivo: Annotated[UploadFile, File()],
     db: SesionDb,
-    usuario: UsuarioActual,
+    usuario: SoloAsistente,
     gerente_id: GerenteId,
     origen: OrigenSolicitud,
 ) -> ComprobanteSalida:

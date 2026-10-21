@@ -4,7 +4,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -155,6 +155,31 @@ def nueva_deuda(
         fecha_vencimiento=fecha_vencimiento,
     )
     db.add(deuda)
+    db.flush()
+    return deuda
+
+
+def asistente_anterior(db: Session, gerente: Usuario) -> Usuario:
+    """Una asistente que el gerente ya desactivó: su intento o su solicitud siguen vigentes y la
+    asistente actual es «otra persona» frente a ellos."""
+    anterior = Usuario(
+        rol="asistente",
+        gerente_id=gerente.id,
+        username=f"anterior_{uuid.uuid4().hex[:12]}",
+        password_hash="x",
+        estado="inactiva",
+    )
+    db.add(anterior)
+    db.flush()
+    return anterior
+
+
+def en_proceso_por(db: Session, deuda: Deuda, usuario: Usuario) -> Deuda:
+    """Pago en curso de otra persona sin pasar por iniciar_pago: un intento de la asistente
+    anterior o uno que inició el gerente antes de que solo la asistente pagara (TASK-109)."""
+    deuda.estado = "en_proceso"
+    deuda.pago_iniciado_por = usuario.id
+    deuda.pago_iniciado_en = datetime.now(UTC)
     db.flush()
     return deuda
 

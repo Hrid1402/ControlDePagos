@@ -21,7 +21,14 @@ from app.services.ordenes import (
     salida_orden,
 )
 from app.services.pagos import ResultadoInicio, cancelar_inicio, iniciar_pago
-from tests.conftest import DosGerentes, Equipo, nueva_deuda, nueva_orden, nuevo_comprobante
+from tests.conftest import (
+    DosGerentes,
+    Equipo,
+    en_proceso_por,
+    nueva_deuda,
+    nueva_orden,
+    nuevo_comprobante,
+)
 
 Publicados = list[tuple[uuid.UUID, Evento]]
 
@@ -270,7 +277,7 @@ def test_aceptar_una_deuda_que_paga_otra_persona_responde_409(
 ) -> None:
     equipo = dos_gerentes.uno
     orden = orden_de(db, equipo)
-    iniciar_pago(db, equipo.gerente, orden.deuda_id, origen=ORIGEN, ahora=AHORA)
+    en_proceso_por(db, db.get_one(Deuda, orden.deuda_id), equipo.gerente)
 
     error = error_de(lambda: aceptar(db, equipo.asistente, orden))
 

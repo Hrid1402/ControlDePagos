@@ -26,7 +26,14 @@ from app.services.pagos import (
     iniciar_pago,
 )
 from app.services.saldo import consumo_mes_pen
-from tests.conftest import DosGerentes, Equipo, nueva_deuda, nuevo_comprobante
+from tests.conftest import (
+    DosGerentes,
+    Equipo,
+    asistente_anterior,
+    en_proceso_por,
+    nueva_deuda,
+    nuevo_comprobante,
+)
 
 ORIGEN = Origen(dispositivo="pruebas", ip=None)
 AHORA = datetime(2026, 10, 19, 17, 0, tzinfo=UTC)  # 19/10 12:00 en Lima
@@ -206,19 +213,19 @@ def test_aprobacion_de_otro_importe_o_moneda_pide_otra_solicitud(
     assert iniciar(db, equipo.asistente, deuda).resultado == ResultadoInicio.REQUIERE_APROBACION
 
 
-def test_el_gerente_no_tiene_limite_ni_cuenta_en_el_consumo(
-    db: Session, dos_gerentes: DosGerentes
-) -> None:
+def test_el_gerente_no_inicia_pagos(db: Session, dos_gerentes: DosGerentes) -> None:
+    """Pagar y subir el voucher es de la asistente; el gerente registra, ordena y valida."""
     equipo = dos_gerentes.uno
-    fijar_limite(db, equipo.gerente, por_pago="10.00", mensual="10.00")
-    soles = nueva_deuda(db, equipo.gerente, monto="1000.00")
-    dolares = nueva_deuda(db, equipo.gerente, monto="500.00", moneda="USD")
-
-    assert iniciar(db, equipo.gerente, soles).resultado == ResultadoInicio.INICIADO
-    assert iniciar(db, equipo.gerente, dolares).resultado == ResultadoInicio.INICIADO
+    for deuda in (
+        nueva_deuda(db, equipo.gerente, monto="1000.00"),
+        nueva_deuda(db, equipo.gerente, monto="500.00", moneda="USD"),
+    ):
+        error = error_de(lambda deuda=deuda: iniciar(db, equipo.gerente, deuda))
+        assert (error.status_code, error.code) == (403, "SIN_PERMISO")
+        assert (deuda.estado, deuda.pago_iniciado_por) == ("pendiente", None)
+        assert auditorias(db, deuda, "pago_iniciado") == []
+        assert acciones_de_pago(db, deuda, equipo.gerente).iniciar is False
     assert consumo_mes_pen(db, equipo.gerente.id, AHORA) == Decimal(0)
-    [registro] = auditorias(db, soles, "pago_iniciado")
-    assert registro.detalle["autorizacion"] == "gerente"
 
 
 def nueva_orden(db: Session, equipo: Equipo, deuda: Deuda, estado: str = "aceptada") -> OrdenPago:
@@ -326,13 +333,14 @@ def test_otro_usuario_recibe_409_si_el_pago_ya_empezo(
     db: Session, dos_gerentes: DosGerentes
 ) -> None:
     equipo = dos_gerentes.uno
-    de_asistente = nueva_deuda(db, equipo.gerente)
-    iniciar(db, equipo.asistente, de_asistente)
-    error = error_de(lambda: iniciar(db, equipo.gerente, de_asistente))
+    anterior = asistente_anterior(db, equipo.gerente)
+    de_la_anterior = en_proceso_por(db, nueva_deuda(db, equipo.gerente), anterior)
+    error = error_de(lambda: iniciar(db, equipo.asistente, de_la_anterior))
     assert (error.status_code, error.code) == (409, "PAGO_EN_CURSO")
+    assert de_la_anterior.pago_iniciado_por == anterior.id
 
-    del_gerente = nueva_deuda(db, equipo.gerente)
-    iniciar(db, equipo.gerente, del_gerente)
+    # Un intento que el gerente inició antes de TASK-109 también es de otra persona.
+    del_gerente = en_proceso_por(db, nueva_deuda(db, equipo.gerente), equipo.gerente)
     error = error_de(lambda: iniciar(db, equipo.asistente, del_gerente))
     assert (error.status_code, error.code) == (409, "PAGO_EN_CURSO")
     assert del_gerente.pago_iniciado_por == equipo.gerente.id
@@ -341,9 +349,9 @@ def test_otro_usuario_recibe_409_si_el_pago_ya_empezo(
 def test_solicitud_pendiente_bloquea_a_otra_persona(db: Session, dos_gerentes: DosGerentes) -> None:
     equipo = dos_gerentes.uno
     deuda = nueva_deuda(db, equipo.gerente, moneda="USD")
-    iniciar(db, equipo.asistente, deuda)
+    iniciar(db, asistente_anterior(db, equipo.gerente), deuda)
 
-    error = error_de(lambda: iniciar(db, equipo.gerente, deuda))
+    error = error_de(lambda: iniciar(db, equipo.asistente, deuda))
 
     assert (error.status_code, error.code) == (409, "APROBACION_PENDIENTE")
     assert deuda.estado == "esperando_aprobacion"
@@ -363,13 +371,9 @@ def test_estados_que_no_permiten_iniciar(
     assert deuda.estado == estado
 
 
-@pytest.mark.parametrize("rol", ["gerente", "asistente"])
-def test_la_deuda_de_otro_gerente_no_existe(
-    db: Session, dos_gerentes: DosGerentes, rol: str
-) -> None:
+def test_la_deuda_de_otro_gerente_no_existe(db: Session, dos_gerentes: DosGerentes) -> None:
     deuda = nueva_deuda(db, dos_gerentes.uno.gerente)
-    usuario = getattr(dos_gerentes.dos, rol)
-    error = error_de(lambda: iniciar(db, usuario, deuda))
+    error = error_de(lambda: iniciar(db, dos_gerentes.dos.asistente, deuda))
     assert (error.status_code, error.code) == (404, "NO_ENCONTRADO")
     assert deuda.estado == "pendiente"
 
@@ -397,12 +401,11 @@ def test_el_indice_impide_una_segunda_solicitud_pendiente(
     assert deuda.estado == "pendiente"
 
 
-@pytest.mark.parametrize("rol", ["gerente", "asistente"])
 def test_la_deuda_esperando_recibo_sin_monto_no_se_inicia_hasta_confirmar_el_importe(
-    db: Session, dos_gerentes: DosGerentes, rol: str
+    db: Session, dos_gerentes: DosGerentes
 ) -> None:
     equipo = dos_gerentes.uno
-    usuario = getattr(equipo, rol)
+    usuario = equipo.asistente
     deuda = nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
     consumo = consumo_mes_pen(db, equipo.gerente.id, AHORA)
 

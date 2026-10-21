@@ -99,11 +99,23 @@ def test_agrupa_por_lugar_sin_banca_movil_ni_lo_que_paga_otro(
     assert [i["id"] for i in ninguno["items"]] == [str(sin_lugar.id)]
     assert cuerpo["totales"] == {"PEN": "187.50", "USD": "20.00"}
 
-    # El gerente ve como suya la que él está pagando, y no la de su asistente.
-    del_gerente = cliente.get("/api/v1/ruta", headers=cabecera(equipo.gerente)).json()
-    bcp_gerente = next(g for g in del_gerente["grupos"] if g["lugar"] == "agente_bcp")
-    assert len(bcp_gerente["items"]) == 3
-    assert str(mia.id) not in {i["id"] for g in del_gerente["grupos"] for i in g["items"]}
+
+def test_la_ruta_es_de_la_asistente(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    """El gerente no paga ni sube vouchers (TASK-109): la ruta le responde 403."""
+    equipo = dos_gerentes.uno
+    deuda = con_lugar(db, nueva_deuda(db, equipo.gerente), "agente_bcp")
+
+    ver = cliente.get("/api/v1/ruta", headers=cabecera(equipo.gerente))
+    iniciar = cliente.post(
+        "/api/v1/ruta/iniciar", json={"deudas": [str(deuda.id)]}, headers=cabecera(equipo.gerente)
+    )
+
+    assert (ver.status_code, ver.json()["code"]) == (403, "SIN_PERMISO")
+    assert (iniciar.status_code, iniciar.json()["code"]) == (403, "SIN_PERMISO")
+    db.refresh(deuda)
+    assert deuda.estado == "pendiente"
 
 
 def test_iniciar_en_lote_da_el_resultado_de_cada_deuda_sin_omitir_ninguna(

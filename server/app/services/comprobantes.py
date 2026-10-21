@@ -1,11 +1,10 @@
-"""Subida, reemplazo y consulta de comprobantes (H24 CA01, CA06, CA08 y CA09; TASK-84).
+"""Subida, reemplazo y consulta de comprobantes (H24 CA01, CA06 y CA08; TASK-84 y TASK-109).
 
 Reglas al subir, todas con las deudas bloqueadas hasta el commit:
 - Las deudas son del gerente y comparten moneda, que pasa a ser la del comprobante. El OCR
   comprueba después que el documento diga lo mismo.
-- Se adjunta sobre un intento vigente: en_proceso o por_validar (otro comprobante del mismo
-  pago). El gerente también puede adjuntar sobre pendiente o pagada_parcial (CA09); el intento
-  queda a su nombre, como si lo hubiera iniciado.
+- Solo la asistente sube el voucher, sobre un intento vigente: en_proceso o por_validar (otro
+  comprobante del mismo pago). El gerente ya no adjunta (reemplaza CA09, TASK-109): valida.
 - monto_aplicado de cada deuda no supera lo disponible: el saldo menos lo que ya reservan otros
   comprobantes que todavía pueden validarse. Si se omite, se aplica todo lo disponible.
 - Un archivo con el mismo hash que un comprobante no rechazado responde 409 DUPLICADO. Si es del
@@ -97,12 +96,16 @@ def aplicado_en_curso(db: Session, deuda_id: uuid.UUID) -> Decimal:
     return total or Decimal("0.00")
 
 
-def comprobar_estado(deuda: Deuda, usuario: Usuario) -> None:
+def solo_asistente(usuario: Usuario) -> None:
+    """El voucher lo sube la asistente que pagó; el gerente lo valida (TASK-109)."""
+    if usuario.rol != "asistente":
+        raise ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
+
+
+def comprobar_estado(deuda: Deuda) -> None:
     if deuda.estado in ESTADOS_CON_INTENTO:
         return
     if deuda.estado in ESTADOS_SIN_INTENTO:
-        if usuario.rol == "gerente":
-            return
         raise ErrorApi(
             409,
             "SIN_INTENTO",
@@ -119,7 +122,6 @@ def comprobar_estado(deuda: Deuda, usuario: Usuario) -> None:
 
 def preparar_repartos(
     db: Session,
-    usuario: Usuario,
     gerente_id: uuid.UUID,
     entradas: list[RepartoComprobanteEntrada],
 ) -> list[Reparto]:
@@ -139,7 +141,7 @@ def preparar_repartos(
     repartos = []
     for entrada in entradas:
         deuda = deudas[entrada.deuda_id]
-        comprobar_estado(deuda, usuario)
+        comprobar_estado(deuda)
         saldo = saldo_de(db, deuda)
         disponible = (saldo or Decimal(0)) - aplicado_en_curso(db, deuda.id)
         if disponible <= 0:
@@ -242,12 +244,7 @@ def registrar(
         eliminar_privado(ruta)
         raise
     for reparto in repartos:
-        deuda = reparto.deuda
-        if deuda.estado in ESTADOS_SIN_INTENTO:
-            deuda.pago_iniciado_por = usuario.id
-            deuda.pago_iniciado_en = ahora
-            deuda.recordatorios_enviados = 0
-        deuda.estado = "por_validar"
+        reparto.deuda.estado = "por_validar"
     encolar_tras_commit(
         db, celery_app.signature(TAREA_PROCESAR_COMPROBANTE, args=(str(comprobante.id),))
     )
@@ -264,7 +261,8 @@ def subir_comprobante(
     origen: Origen,
     ahora: datetime | None = None,
 ) -> Comprobante:
-    repartos = preparar_repartos(db, usuario, gerente_id, entradas)
+    solo_asistente(usuario)
+    repartos = preparar_repartos(db, gerente_id, entradas)
     comprobante = registrar(db, usuario, gerente_id, archivo, repartos, ahora or ahora_lima())
     registrar_auditoria(
         db,
@@ -324,6 +322,7 @@ def reemplazar_comprobante(
     ahora: datetime | None = None,
 ) -> Comprobante:
     """Sube una versión nueva de un comprobante rechazado con su mismo reparto (CA08)."""
+    solo_asistente(usuario)
     # El anterior se bloquea antes que las deudas: dos reemplazos simultáneos se turnan y el
     # segundo ve la versión que creó el primero.
     anterior = comprobante_visible(db, comprobante_id, gerente_id, bloquear=True)
@@ -337,7 +336,7 @@ def reemplazar_comprobante(
         RepartoComprobanteEntrada(deuda_id=r.deuda_id, monto_aplicado=r.monto_aplicado)
         for r in repartos_de(db, anterior.id)
     ]
-    repartos = preparar_repartos(db, usuario, gerente_id, entradas)
+    repartos = preparar_repartos(db, gerente_id, entradas)
     comprobante = registrar(
         db, usuario, gerente_id, archivo, repartos, ahora or ahora_lima(), anterior.id
     )

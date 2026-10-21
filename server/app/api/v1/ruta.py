@@ -1,8 +1,8 @@
 """Ruta de pagos presenciales (H23): deudas agrupadas por lugar de pago e inicio en lote.
 
-La ven el gerente y su asistente; cada una ve las deudas que puede pagar ella misma. Iniciar el
-lote aplica a cada deuda las reglas de iniciar-pago (límites, aprobación, intento de otra
-persona) y responde 200 con el resultado de cada una. Errores del lote completo: 401, 403
+Es de la asistente: ella paga y sube el voucher (TASK-109); el gerente recibe 403 SIN_PERMISO.
+Iniciar el lote aplica a cada deuda las reglas de iniciar-pago (límites, aprobación, intento de
+otra persona) y responde 200 con el resultado de cada una. Errores del lote completo: 401, 403
 SIN_PERMISO y 422 VALIDACION (lista vacía, más de 50 deudas o una repetida).
 """
 
@@ -10,7 +10,7 @@ import uuid
 
 from fastapi import APIRouter
 
-from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
+from app.core.dependencias import OrigenSolicitud, SesionDb, SoloAsistente
 from app.schemas.bandeja import CategoriaBandeja
 from app.schemas.ruta import (
     GrupoRutaSalida,
@@ -48,7 +48,7 @@ def item_salida(fila: FilaRuta, usuario_id: uuid.UUID) -> ItemRuta:
 
 
 @router.get("")
-def ver_ruta(db: SesionDb, usuario: UsuarioActual) -> RutaSalida:
+def ver_ruta(db: SesionDb, usuario: SoloAsistente) -> RutaSalida:
     """Deudas por pagar en persona, agrupadas por lugar, con el total de cada grupo."""
     grupos = consultar_ruta(db, usuario)
     filas = [fila for grupo in grupos for fila in grupo.filas]
@@ -67,7 +67,7 @@ def ver_ruta(db: SesionDb, usuario: UsuarioActual) -> RutaSalida:
 
 @router.post("/iniciar")
 def iniciar(
-    datos: IniciarRutaEntrada, db: SesionDb, usuario: UsuarioActual, origen: OrigenSolicitud
+    datos: IniciarRutaEntrada, db: SesionDb, usuario: SoloAsistente, origen: OrigenSolicitud
 ) -> IniciarRutaSalida:
     """Inicia el pago de las deudas elegidas; cada una tiene su propio resultado."""
     resultados = iniciar_ruta(db, usuario, datos.deudas, origen=origen)
