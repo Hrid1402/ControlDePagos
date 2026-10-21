@@ -40,7 +40,12 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     task_cls="app.workers.base:TareaBase",
-    include=["app.workers.aprobaciones", "app.workers.comprobantes", "app.workers.latido"],
+    include=[
+        "app.workers.aprobaciones",
+        "app.workers.comprobantes",
+        "app.workers.latido",
+        "app.workers.recurrencias",
+    ],
 )
 celery_app.conf.update(
     task_serializer="json",
