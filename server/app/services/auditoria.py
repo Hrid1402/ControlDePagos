@@ -63,6 +63,8 @@ class Accion(StrEnum):
     SERVICIO_DADO_DE_BAJA = "servicio_dado_de_baja"
     SERVICIO_REACTIVADO = "servicio_reactivado"
     DEUDA_CREADA = "deuda_creada"
+    COMPROBANTE_SUBIDO = "comprobante_subido"
+    COMPROBANTE_REEMPLAZADO = "comprobante_reemplazado"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.

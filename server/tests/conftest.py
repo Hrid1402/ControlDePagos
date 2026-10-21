@@ -1,4 +1,5 @@
 import hashlib
+import io
 import os
 import uuid
 from collections.abc import Iterator
@@ -6,10 +7,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from botocore.exceptions import ClientError
 from sqlalchemy.orm import Session
 
 os.environ["DATABASE_URL"] = os.environ.get(
@@ -30,6 +33,7 @@ from app.models import (  # noqa: E402
     Servicio,
     Usuario,
 )
+from app.services import archivos  # noqa: E402
 
 
 @dataclass
@@ -196,3 +200,38 @@ def nueva_orden(
     db.add(orden)
     db.flush()
     return orden
+
+
+class S3EnMemoria:
+    """Cliente S3 mínimo: guarda los objetos en un diccionario y puede fallar a pedido."""
+
+    def __init__(self) -> None:
+        self.objetos: dict[str, tuple[bytes, str]] = {}
+        self.falla = False
+
+    def _quizas_fallar(self, operacion: str) -> None:
+        if self.falla:
+            raise ClientError({"Error": {"Code": "500", "Message": "caído"}}, operacion)
+
+    def put_object(self, Bucket: str, Key: str, Body: bytes, ContentType: str) -> None:
+        self._quizas_fallar("PutObject")
+        self.objetos[Key] = (Body, ContentType)
+
+    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        self._quizas_fallar("GetObject")
+        return {"Body": io.BytesIO(self.objetos[Key][0])}
+
+    def delete_object(self, Bucket: str, Key: str) -> None:
+        self._quizas_fallar("DeleteObject")
+        self.objetos.pop(Key, None)
+
+    def generate_presigned_url(self, operacion: str, Params: dict[str, str], ExpiresIn: int) -> str:
+        self._quizas_fallar("GeneratePresignedUrl")
+        return f"https://s3.local/{Params['Key']}?expira={ExpiresIn}"
+
+
+@pytest.fixture
+def s3(monkeypatch: pytest.MonkeyPatch) -> S3EnMemoria:
+    cliente = S3EnMemoria()
+    monkeypatch.setattr(archivos, "cliente_s3", lambda: cliente)
+    return cliente
