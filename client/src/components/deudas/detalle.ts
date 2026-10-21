@@ -111,6 +111,7 @@ const EVENTOS: Record<string, string> = {
   deuda_pospuesta: 'La pospuso hasta mañana',
   pago_iniciado: 'Empezó a pagarla',
   pago_inicio_cancelado: 'Canceló el pago en curso',
+  pago_declarado: 'Marcó el pago como hecho en la ruta',
   aprobacion_solicitada: 'Pidió aprobación para pagarla',
   aprobacion_aprobada: 'Aprobó el pago',
   aprobacion_rechazada: 'Rechazó el pago',

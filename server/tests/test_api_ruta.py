@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.seguridad import crear_token
 from app.main import app
 from app.models import Auditoria, Deuda, Limite, Servicio, Usuario
-from tests.conftest import DosGerentes, nueva_deuda
+from tests.conftest import DosGerentes, nueva_deuda, nuevo_comprobante
 
 
 @pytest.fixture
@@ -238,6 +238,21 @@ def test_marcar_pagada_deja_la_deuda_en_proceso_y_conserva_la_primera_fecha(
         "items"
     ][0]
     assert (item["id"], item["en_ruta"], item["pago_realizado"]) == (str(deuda.id), True, True)
+
+    # Con el voucher subido sigue en su ruta, por validar, hasta que el gerente lo valide.
+    db.refresh(deuda)
+    nuevo_comprobante(
+        db, deuda, equipo.asistente, "85.40", estado="procesando", creado_en=deuda.pago_iniciado_en
+    )
+    deuda.estado = "por_validar"
+    db.flush()
+    ruta = cliente.get("/api/v1/ruta", headers=cabecera(equipo.asistente)).json()
+    item = ruta["grupos"][0]["items"][0]
+    assert (item["estado"], item["en_ruta"], item["comprobante_estado"]) == (
+        "por_validar",
+        True,
+        "procesando",
+    )
 
 
 def test_la_deuda_de_otro_gerente_responde_404(

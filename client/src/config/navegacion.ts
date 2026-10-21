@@ -98,6 +98,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Ruta de pagos',
       descripcion: 'Los pagos presenciales agrupados por lugar, con el total que debes llevar.',
       principal: true,
+      pagina: () => import('@/pages/RutaPage.vue'),
     },
     {
       clave: 'comprobantes',

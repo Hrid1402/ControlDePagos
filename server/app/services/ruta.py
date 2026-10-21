@@ -2,7 +2,8 @@
 
 La ruta es una consulta, no una tabla. Entra lo que la persona puede salir a pagar:
 - Deudas pendientes o pagadas en parte, con saldo.
-- Las que ella misma tiene en proceso: ya están en su ruta, declaradas o no (CA03).
+- Las que ella misma está pagando: en proceso, declaradas o no (CA03), y por validar con su voucher
+  subido, hasta que el gerente lo valide (TASK-80 distingue declarado de validado).
 - Las que esperan la aprobación que ella pidió, para que sepa por qué no puede iniciarlas.
 No entran las que paga otra persona, ni banca móvil, que en este sprint también es Yape (CA05).
 Las deudas sin lugar registrado van en su propio grupo, al final.
@@ -32,6 +33,8 @@ LUGARES_RUTA = ("agente_bcp", "agente_kasnet", "ventanilla_empresa", "otro")
 EXCLUIDOS = ("banca_movil",)
 MONEDAS = ("PEN", "USD")
 MAXIMO_LOTE = 50
+# Estados de una deuda que la persona ya tiene en su ruta.
+ESTADOS_EN_RUTA = ("en_proceso", "por_validar")
 
 
 class ResultadoLote(StrEnum):
@@ -93,7 +96,7 @@ def en_la_ruta(usuario: Usuario) -> ColumnElement[bool]:
     )
     return or_(
         Deuda.estado.in_(ESTADOS_INICIABLES),
-        and_(Deuda.estado == "en_proceso", Deuda.pago_iniciado_por == usuario.id),
+        and_(Deuda.estado.in_(ESTADOS_EN_RUTA), Deuda.pago_iniciado_por == usuario.id),
         and_(Deuda.estado == "esperando_aprobacion", pidio_aprobacion),
     )
 

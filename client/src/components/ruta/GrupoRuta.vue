@@ -27,6 +27,12 @@ const elegidas = computed(() => disponibles.value.filter((i) => props.seleccion.
 const todas = computed(
   () => disponibles.value.length > 0 && elegidas.value.length === disponibles.value.length,
 )
+// Lo que falta pagar del grupo: lo ya declarado o con voucher no se vuelve a llevar.
+const porLlevar = computed(() =>
+  props.grupo.items.filter((i) =>
+    ['disponible', 'espera_aprobacion', 'por_pagar'].includes(pasoDe(i)),
+  ),
+)
 const nombre = (item: ItemRuta) => item.alias || item.empresa || 'Servicio'
 
 function alternar(id: string, valor: boolean) {
@@ -46,8 +52,8 @@ function alternarTodas(valor: boolean) {
       <div class="lugar-texto">
         <h2 :id="`lugar-${grupo.lugar ?? 'ninguno'}`">{{ lugar.titulo }}</h2>
         <p>
-          {{ grupo.items.length === 1 ? '1 deuda' : `${grupo.items.length} deudas` }} · llevar
-          {{ textoTotal(grupo.items) }}
+          {{ grupo.items.length === 1 ? '1 deuda' : `${grupo.items.length} deudas` }} ·
+          {{ porLlevar.length ? `llevar ${textoTotal(porLlevar)}` : 'todo pagado' }}
         </p>
       </div>
       <label v-if="disponibles.length > 1" class="todas">
