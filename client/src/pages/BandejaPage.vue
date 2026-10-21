@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 import BandejaSuperficie from '@/components/bandeja/BandejaSuperficie.vue'
 import {
   consultaDeQuery,
@@ -11,7 +12,7 @@ import {
 } from '@/components/bandeja/modelo'
 import type { CategoriaDeuda } from '@/components/deudas/listado'
 import { hoyEnLima } from '@/components/deudas/modelo'
-import { obtenerBandejaCompleta } from '@/api/bandeja'
+import { fijarDeuda, obtenerBandejaCompleta, recordarManana } from '@/api/bandeja'
 import { listarCategorias } from '@/api/categorias'
 import { useSesionStore } from '@/stores/sesion'
 import type { ErrorApi } from '@/types/api'
@@ -20,6 +21,7 @@ import type { ErrorApi } from '@/types/api'
 // categoría viven en la URL, así se conservan al volver del detalle de una deuda.
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const sesion = useSesionStore()
 
 const items = ref<ItemBandeja[]>([])
@@ -27,6 +29,8 @@ const contadores = ref<Contadores>({ por_pagar: 0, por_validar: 0, rechazadas: 0
 const categorias = ref<CategoriaDeuda[]>([])
 const estadoPantalla = ref<'lista' | 'cargando' | 'error'>('cargando')
 const seleccion = ref<string[]>([])
+/** La deuda con una acción en curso: sus botones se desactivan hasta que termine. */
+const ocupado = ref<string | null>(null)
 const consulta = computed(() => consultaDeQuery(route.query))
 
 let solicitud: AbortController | null = null
@@ -76,6 +80,50 @@ function filtrar(cambios: Partial<{ pestana: Pestana; categoria: string }>) {
 function abrir(id: string) {
   void router.push({ name: `${sesion.rol}-deuda`, params: { id } })
 }
+
+function avisarError(fallo: unknown) {
+  toast.add({
+    severity: 'error',
+    summary: 'No se pudo completar',
+    detail: (fallo as ErrorApi).detail,
+    life: 6000,
+  })
+}
+
+/** Ejecuta la acción de una deuda y vuelve a pedir la bandeja: el orden lo decide el backend. */
+async function ejecutar(id: string, trabajo: () => Promise<void>) {
+  ocupado.value = id
+  try {
+    await trabajo()
+  } catch (fallo) {
+    avisarError(fallo)
+  } finally {
+    await cargar(true)
+    ocupado.value = null
+  }
+}
+
+// CA07: fijada sube arriba, después de las órdenes urgentes.
+function fijar(id: string, valor: boolean) {
+  return ejecutar(id, async () => {
+    await fijarDeuda(id, valor)
+  })
+}
+
+// CA08: desaparece hasta las 08:00 de mañana. Con una orden urgente abierta el backend responde
+// 409 y el aviso lo explica.
+function posponer(id: string) {
+  return ejecutar(id, async () => {
+    await recordarManana(id)
+    seleccion.value = seleccion.value.filter((s) => s !== id)
+    toast.add({
+      severity: 'success',
+      summary: 'Te la recordamos mañana',
+      detail: 'Vuelve a la bandeja mañana a las 8:00.',
+      life: 4000,
+    })
+  })
+}
 </script>
 
 <template>
@@ -90,10 +138,13 @@ function abrir(id: string) {
     :seleccion="seleccion"
     :usuario-id="sesion.usuario?.id"
     :nombre="sesion.usuario?.nombre"
+    :ocupado="ocupado"
     @cambiar-pestana="filtrar({ pestana: $event })"
     @filtrar-categoria="filtrar({ categoria: $event })"
     @seleccionar="seleccion = $event"
     @abrir="abrir"
+    @fijar="fijar"
+    @posponer="posponer"
     @reintentar="cargar()"
   />
 </template>
