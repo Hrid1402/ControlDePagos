@@ -10,6 +10,9 @@ Anular: solo el gerente, sin pago en curso, sin abonos y sin orden urgente abier
 anulada, no se borra (CA11), y anularla otra vez no hace nada. Una deuda pagada o anulada no se
 edita.
 
+Recibo (CA08): se adjunta o reemplaza en el almacenamiento privado mientras la deuda no esté
+anulada. El recibo anterior lo borra quien llama después del commit.
+
 Las funciones no hacen commit. Las deudas se bloquean con el mismo orden que el pago (pagos.py).
 """
 
@@ -26,6 +29,7 @@ from app.core.errores import ErrorApi
 from app.core.tiempo import ahora_lima
 from app.models import Deuda, HistorialMonto, OrdenPago, Servicio, Usuario
 from app.schemas.deudas import DeudaEdicion, validar_fechas_y_minimo
+from app.services.archivos import ArchivoValidado, eliminar_privado, guardar_privado, ruta_recibo
 from app.services.auditoria import Accion, diferencias, nombre_de, registrar_auditoria
 from app.services.notificaciones import TipoNotificacion, notificar
 from app.services.pagos import bloquear_deuda
@@ -218,3 +222,41 @@ def anular_deuda(
             ahora=ahora or ahora_lima(),
         )
     return deuda
+
+
+def adjuntar_recibo(
+    db: Session,
+    usuario: Usuario,
+    deuda_id: uuid.UUID,
+    archivo: ArchivoValidado,
+    *,
+    origen: Origen,
+) -> tuple[Deuda, str | None]:
+    """Guarda el recibo y devuelve la deuda y la ruta del recibo anterior, para borrarlo."""
+    gerente_id = gerente_de(usuario)
+    if gerente_id is None:
+        raise ErrorApi(403, "SIN_PERMISO", "No tienes permiso para realizar esta acción.")
+    deuda = bloquear_deuda(db, deuda_id, gerente_id)
+    if deuda.estado == "anulada":
+        raise conflicto("ESTADO_NO_PERMITIDO", "La deuda está anulada: no admite recibos.")
+    anterior = deuda.recibo_url
+    ruta = ruta_recibo(gerente_id, deuda.id, archivo.extension)
+    guardar_privado(ruta, archivo)
+    try:
+        deuda.recibo_url = ruta
+        registrar_auditoria(
+            db,
+            usuario,
+            Accion.DEUDA_EDITADA,
+            "deuda",
+            deuda.id,
+            {
+                "recibo": "reemplazado" if anterior else "adjuntado",
+                "archivo_tipo": archivo.extension,
+            },
+            origen=origen,
+        )
+    except BaseException:
+        eliminar_privado(ruta)
+        raise
+    return deuda, anterior

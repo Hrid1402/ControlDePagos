@@ -7,9 +7,13 @@ import { useToast } from 'primevue/usetoast'
 import DeudaDetalleSuperficie from '@/components/deudas/DeudaDetalleSuperficie.vue'
 import { hoyEnLima } from '@/components/deudas/modelo'
 import type { AccionDeuda, ComentarioDeuda, DetalleDeuda } from '@/components/deudas/detalle'
+import EditarDeuda from '@/components/deudas/EditarDeuda.vue'
 import {
+  anularDeuda,
   cancelarInicio,
   comentarDeuda,
+  editarDeuda,
+  subirRecibo,
   iniciarPago,
   listarComentarios,
   obtenerDeuda,
@@ -124,6 +128,36 @@ function accion(nombre: AccionDeuda) {
     motivo.value = ''
     cancelando.value = true
   }
+  if (nombre === 'editar') editando.value = true
+  if (nombre === 'anular') {
+    motivoAnular.value = ''
+    anulando.value = true
+  }
+}
+
+// Editar (H11 CA10): solo viaja lo que cambió; el recibo se sube aparte.
+const editando = ref(false)
+async function guardarEdicion(valores: Record<string, unknown>) {
+  const actual = detalle.value!
+  const cambios: Record<string, string> = {}
+  for (const campo of ['monto', 'fecha_vencimiento', 'numero_recibo'] as const) {
+    const valor = String(valores[campo] ?? '').trim()
+    if (valor && valor !== (actual[campo] ?? '')) cambios[campo] = valor
+  }
+  if (Object.keys(cambios).length) detalle.value = await editarDeuda(id.value, cambios)
+  if (valores.recibo instanceof File) detalle.value = await subirRecibo(id.value, valores.recibo)
+  editando.value = false
+}
+
+// Anular (H11 CA11): pide confirmación y deja la deuda como historial.
+const anulando = ref(false)
+const motivoAnular = ref('')
+async function confirmarAnulacion() {
+  anulando.value = false
+  await ejecutar('anular', async () => {
+    detalle.value = await anularDeuda(id.value, motivoAnular.value.trim() || null)
+    toast.add({ severity: 'success', summary: 'Deuda anulada', life: 4000 })
+  })
 }
 
 async function confirmarCancelacion() {
@@ -205,6 +239,28 @@ function volver() {
     aria-label="Elegir el comprobante"
     @change="adjuntar"
   />
+  <EditarDeuda
+    v-if="editando && detalle"
+    :deuda="detalle"
+    :guardar="guardarEdicion"
+    @cerrar="editando = false"
+  />
+  <Dialog
+    v-model:visible="anulando"
+    modal
+    header="¿Anular esta deuda?"
+    :style="{ width: 'min(92vw, 460px)' }"
+  >
+    <p class="explica">
+      Deja de cobrarse y queda solo como historial: no se borra ni se puede pagar después.
+    </p>
+    <label for="motivo-anular" class="etiqueta">Motivo (opcional)</label>
+    <textarea id="motivo-anular" v-model="motivoAnular" rows="3" maxlength="300"></textarea>
+    <template #footer>
+      <Button label="Volver" text @click="anulando = false" />
+      <Button label="Anular deuda" severity="danger" @click="confirmarAnulacion" />
+    </template>
+  </Dialog>
   <Dialog
     v-model:visible="cancelando"
     modal

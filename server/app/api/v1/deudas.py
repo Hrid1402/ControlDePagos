@@ -15,7 +15,7 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from app.core.dependencias import (
     GerenteId,
@@ -48,7 +48,12 @@ from app.schemas.deudas import (
     OrdenListado,
     Periodo,
 )
-from app.services.archivos import enlace_firmado
+from app.services.archivos import (
+    confirmar_con_archivo,
+    eliminar_privado,
+    enlace_firmado,
+    validar_archivo,
+)
 from app.services.auditoria import nombre_de
 from app.services.detalle_deuda import DetalleDeuda, obtener_detalle
 from app.services.deudas import (
@@ -59,7 +64,7 @@ from app.services.deudas import (
     registrar_deuda,
     texto_periodo,
 )
-from app.services.edicion_deudas import anular_deuda, editar_deuda
+from app.services.edicion_deudas import adjuntar_recibo, anular_deuda, editar_deuda
 
 router = APIRouter(prefix="/deudas", tags=["deudas"])
 
@@ -285,3 +290,21 @@ def anular(
     anular_deuda(db, gerente, deuda_id, entrada.motivo if entrada else None, origen=origen)
     db.commit()
     return detalle_salida(obtener_detalle(db, gerente, deuda_id))
+
+
+@router.post("/{deuda_id}/recibo")
+def subir_recibo(
+    deuda_id: uuid.UUID,
+    archivo: Annotated[UploadFile, File()],
+    db: SesionDb,
+    usuario: UsuarioActual,
+    origen: OrigenSolicitud,
+) -> DetalleDeudaSalida:
+    """Adjunta o reemplaza el recibo (CA08): PDF, JPG o PNG de hasta 10 MB, privado."""
+    deuda, anterior = adjuntar_recibo(
+        db, usuario, deuda_id, validar_archivo(archivo), origen=origen
+    )
+    confirmar_con_archivo(db, deuda.recibo_url or "")
+    if anterior:
+        eliminar_privado(anterior)
+    return detalle_salida(obtener_detalle(db, usuario, deuda_id))

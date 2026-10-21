@@ -122,6 +122,11 @@ def confirmar_con_archivo(db: Session, ruta: str) -> None:
         raise
 
 
+def ruta_recibo(gerente_id: uuid.UUID, deuda_id: uuid.UUID, extension: str) -> str:
+    """Cada versión del recibo tiene su propia ruta: el anterior se borra recién tras el commit."""
+    return f"recibos/{gerente_id}/{deuda_id}-{uuid.uuid4().hex[:8]}.{extension}"
+
+
 def ruta_comprobante(gerente_id: uuid.UUID, comprobante_id: uuid.UUID, extension: str) -> str:
     return f"comprobantes/{gerente_id}/{comprobante_id}.{extension}"
 

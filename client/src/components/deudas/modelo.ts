@@ -134,7 +134,8 @@ export interface DatosDeuda {
   fecha_primera_cuota: string | null
 }
 
-export const RECIBO_TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+// Los mismos que acepta el almacenamiento privado del server (TASK-84).
+export const RECIBO_TIPOS = ['application/pdf', 'image/jpeg', 'image/png']
 export const RECIBO_MAXIMO = 10 * 1024 * 1024
 
 const texto = (valor: unknown) => (typeof valor === 'string' ? valor.trim() : '')
@@ -198,7 +199,7 @@ export function esquemaDeuda(servicios: Servicio[]) {
       }
       if (v.periodo && !PERIODO.test(v.periodo)) falta('periodo', 'Elige un mes válido.')
       if (v.recibo && !RECIBO_TIPOS.includes(v.recibo.type))
-        falta('recibo', 'Adjunta un PDF o una imagen (JPG, PNG o WebP).')
+        falta('recibo', 'Adjunta un PDF o una imagen JPG o PNG.')
       else if (v.recibo && v.recibo.size > RECIBO_MAXIMO)
         falta('recibo', 'El archivo pesa más de 10 MB.')
     })

@@ -117,6 +117,11 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ),
     ("PUT", "/api/v1/servicios/{servicio_id}/recurrencia"): "MATRIZ",
     ("PUT", "/api/v1/deudas/{deuda_id}"): "MATRIZ",
+    ("POST", "/api/v1/deudas/{deuda_id}/recibo"): (
+        "propios y anulada: test_api_edicion_deudas::"
+        "test_adjunta_y_reemplaza_el_recibo_en_privado; deuda ajena: bloquear_deuda, común con "
+        "la edición (MATRIZ de PUT)"
+    ),
     ("POST", "/api/v1/deudas/{deuda_id}/anular"): "MATRIZ",
     # Comprobantes (TASK-84): probadas en sus archivos.
     ("GET", "/api/v1/comprobantes/{comprobante_id}"): (
