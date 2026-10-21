@@ -1,9 +1,9 @@
-"""Validación completa del comprobante y sus abonos (H24 CA04 y CA05, TASK-87).
+"""Validación completa del comprobante y sus abonos (H24 CA04 y CA05, TASK-87 y TASK-109).
 
 Cada caso arma un comprobante en procesando sobre una deuda cuyo servicio coincide con la
 constancia BCP del banco de ejemplos (Hidrandina, código 12345678, S/ 85.40 el 20/10/2026), y
-aplica la lectura como lo hace el worker. La última prueba usa transacciones reales y
-simultáneas.
+aplica la lectura como lo hace el worker. Lo que coincide queda por confirmar y sus abonos se
+aplican cuando el gerente lo aprueba. La última prueba usa transacciones reales y simultáneas.
 """
 
 import threading
@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.dependencias import Origen
 from app.core.tiempo import zona_horaria
 from app.models import (
     Comprobante,
@@ -25,6 +26,7 @@ from app.models import (
     Usuario,
 )
 from app.ocr.motor import LecturaOcr, Linea
+from app.services.revision_comprobantes import aprobar_comprobante
 from app.services.saldo import saldo_de
 from app.services.validacion import aplicar_lectura, bloquear_comprobante
 from tests.conftest import DosGerentes, Equipo, nueva_categoria
@@ -122,6 +124,13 @@ def aplicar(db: Session, comprobante: Comprobante, lectura: LecturaOcr) -> Compr
     return bloqueado
 
 
+def confirmar(db: Session, comprobante: Comprobante, gerente: Usuario) -> Comprobante:
+    """El gerente valida el voucher con un clic, sin corregir el reparto."""
+    aprobado = aprobar_comprobante(db, gerente, comprobante.id, origen=Origen(None, None))
+    db.flush()
+    return aprobado
+
+
 def aplicado(db: Session, comprobante: Comprobante) -> list[Decimal]:
     return list(
         db.scalars(
@@ -141,9 +150,27 @@ def test_un_comprobante_correcto_se_valida_y_la_deuda_queda_pagada(
 
     resultado = aplicar(db, comprobante, constancia())
 
-    assert (resultado.estado, resultado.motivo_codigo) == ("validado", None)
-    assert resultado.datos_extraidos["observacion"] == "Comprobante validado."
-    assert resultado.revisado_en is None and resultado.revisado_por is None
+    # La lectura coincide, pero no se valida sola: el gerente recibe el aviso para validarlo.
+    assert (resultado.estado, resultado.motivo_codigo) == ("por_confirmar", None)
+    assert resultado.datos_extraidos["observacion"] == (
+        "El voucher coincide con la deuda. Falta que el gerente lo valide."
+    )
+    db.refresh(deuda)
+    assert (deuda.estado, saldo_de(db, deuda)) == ("por_validar", Decimal("85.40"))
+    (aviso,) = db.scalars(select(Notificacion))
+    assert (aviso.tipo, aviso.usuario_id, aviso.titulo) == (
+        "comprobante_en_revision",
+        equipo.gerente.id,
+        "Voucher por validar",
+    )
+    assert aviso.mensaje.endswith(
+        "subió el voucher de Hidrandina 12345678 (octubre 2026). Revísalo y valídalo."
+    )
+
+    resultado = confirmar(db, resultado, equipo.gerente)
+
+    assert resultado.estado == "validado"
+    assert resultado.revisado_por == equipo.gerente.id
     db.refresh(deuda)
     assert (deuda.estado, deuda.pago_iniciado_por, deuda.pago_iniciado_en) == (
         "pagada",
@@ -164,12 +191,18 @@ def test_un_monto_menor_deja_la_deuda_pagada_parcialmente_con_su_saldo(
 
     resultado = aplicar(db, comprobante, constancia(monto="50.00"))
 
-    assert (resultado.estado, resultado.motivo_codigo) == ("validado", "monto_menor")
+    assert (resultado.estado, resultado.motivo_codigo) == ("por_confirmar", "monto_menor")
+    assert "Pago parcial de PEN 50.00" in resultado.datos_extraidos["observacion"]
+    db.refresh(deuda)
+    assert (deuda.estado, saldo_de(db, deuda)) == ("por_validar", Decimal("85.40"))
+
+    # Al validarlo se aplica lo que leyó la validación, no el reparto de la subida.
+    resultado = confirmar(db, resultado, equipo.gerente)
+
     assert aplicado(db, resultado) == [Decimal("50.00")]
     db.refresh(deuda)
     assert deuda.estado == "pagada_parcial"
     assert saldo_de(db, deuda) == Decimal("35.40")
-    assert db.scalar(select(func.count()).select_from(Notificacion)) == 0
 
 
 def test_un_monto_mayor_queda_en_revision_sin_tocar_el_saldo(
@@ -245,7 +278,7 @@ def test_con_otro_comprobante_activo_la_deuda_sigue_por_validar(
     comprobante = comprobante_de(db, equipo, [(deuda, "85.40")])
     comprobante_de(db, equipo, [(deuda, "14.60")])
 
-    resultado = aplicar(db, comprobante, constancia())
+    resultado = confirmar(db, aplicar(db, comprobante, constancia()), equipo.gerente)
 
     assert resultado.estado == "validado"
     db.refresh(deuda)
@@ -261,6 +294,8 @@ def test_un_comprobante_para_dos_deudas_las_paga_a_ambas(
     comprobante = comprobante_de(db, equipo, [(octubre, "50.00"), (setiembre, "35.40")])
 
     resultado = aplicar(db, comprobante, constancia())
+    assert resultado.estado == "por_confirmar"
+    resultado = confirmar(db, resultado, equipo.gerente)
 
     assert resultado.estado == "validado"
     for deuda in (octubre, setiembre):
@@ -271,8 +306,8 @@ def test_un_comprobante_para_dos_deudas_las_paga_a_ambas(
 def test_dos_comprobantes_validados_a_la_vez_no_cobran_dos_veces(
     publicados: list[object],
 ) -> None:
-    """Dos workers validan a la vez dos comprobantes de la misma deuda (60 + 40 de 100): cada
-    uno se aplica una vez, por turnos, y la deuda queda pagada con un solo aviso."""
+    """Dos comprobantes de la misma deuda (60 + 40 de 100) se leen y el gerente los valida a la
+    vez: cada uno se aplica una vez, por turnos, y la deuda queda pagada con un solo aviso."""
     marca = uuid.uuid4().hex[:8]
     codigo = f"7{uuid.uuid4().int % 10**7:07d}"
     with SessionLocal() as db:
@@ -303,7 +338,10 @@ def test_dos_comprobantes_validados_a_la_vez_no_cobran_dos_veces(
                     barrera.wait(timeout=10)
                     comprobante = db.get(Comprobante, comprobante_id)
                     assert comprobante is not None
-                    aplicar(db, comprobante, constancia(monto, codigo, operacion))
+                    leido = aplicar(db, comprobante, constancia(monto, codigo, operacion))
+                    gerente = db.get(Usuario, gerente_id)
+                    assert gerente is not None
+                    confirmar(db, leido, gerente)
                     db.commit()
             except BaseException as error:
                 errores.append(error)
