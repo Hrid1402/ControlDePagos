@@ -4,8 +4,13 @@ El worker de OCR (app/workers/comprobantes.py) lee el archivo y llama a aplicar_
 comprobante bloqueado. Este módulo decide el resultado y lo aplica en la misma transacción:
 
 - Sin texto o con confianza media menor a UMBRAL_ILEGIBLE: rechazado por ilegible.
-- Con texto: pasa a revisión del gerente mientras no haya extracción por formato (TASK-86) ni
-  reglas de validación (TASK-87); nunca se valida por el solo hecho de tener texto.
+- Con texto se extraen los datos de su entidad (app/ocr/extraccion.py) y se guardan.
+- El mismo número de operación en la misma entidad que otro comprobante no rechazado: rechazado
+  por duplicado. Si el otro es del mismo gerente, se indica en qué deudas se usó; si es ajeno, el
+  mensaje es genérico (contrato H24, punto 5).
+- Entidad no admitida o algún campo clave ausente: revisión del gerente con la explicación.
+- Con los datos completos: revisión del gerente hasta que existan las reglas de validación
+  (TASK-87); nunca se valida por el solo hecho de tener texto.
 - Si la lectura falla tras sus reintentos, sin_lectura lo deja en revisión con la explicación:
   el registro se conserva y el gerente decide.
 
@@ -22,12 +27,13 @@ import uuid
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.eventos import Evento, TipoEvento, publicar_tras_commit
 from app.core.tiempo import ahora_lima
-from app.models import Comprobante, ComprobanteDeuda, Deuda, Usuario
+from app.models import Comprobante, ComprobanteDeuda, Deuda, Empresa, Servicio, Usuario
+from app.ocr.extraccion import CampoClave, DatosComprobante, Entidad, extraer
 from app.ocr.motor import LecturaOcr
 from app.services.notificaciones import TipoNotificacion, notificar
 from app.services.saldo import ESTADOS_COMPROBANTE_ACTIVO
@@ -43,7 +49,21 @@ ACCION_A_SEGUIR = {
     "otra_deuda": "El comprobante corresponde a otra deuda. Revisa la deuda o adjunta el "
     "comprobante correcto.",
 }
-MENSAJE_SIN_EXTRACCION = "El formato del comprobante aún no se valida solo: lo revisa el gerente."
+MENSAJE_SIN_REGLAS = "Los datos del comprobante aún no se validan solos: lo revisa el gerente."
+MENSAJE_FORMATO_DESCONOCIDO = (
+    "No se reconoce el formato del comprobante: lo revisa el gerente. Se validan solos los de "
+    "BCP, Interbank, BBVA, Scotiabank, Yape, Plin, Agente BCP y KasNet."
+)
+NOMBRES_CAMPOS = {
+    CampoClave.EMPRESA: "la empresa",
+    CampoClave.CODIGO: "el código de suministro",
+    CampoClave.MONEDA: "la moneda",
+    CampoClave.MONTO: "el monto",
+    CampoClave.FECHA: "la fecha",
+}
+MESES = (
+    "enero febrero marzo abril mayo junio julio agosto setiembre octubre noviembre diciembre"
+).split()
 MENSAJE_SIN_LECTURA = "No se pudo leer el archivo automáticamente: lo revisa el gerente."
 
 
@@ -160,6 +180,81 @@ def resolver(
     publicar_resultado(db, comprobante, deudas)
 
 
+def guardar_datos(comprobante: Comprobante, datos: DatosComprobante) -> None:
+    """Guarda los campos extraídos. El número de operación se guarda aparte, después de
+    descartar el duplicado, porque tiene un índice único por entidad."""
+    comprobante.entidad = datos.entidad.value
+    comprobante.monto = datos.monto.valor if datos.monto else None
+    comprobante.fecha_pago = datos.fecha_pago.valor if datos.fecha_pago else None
+    comprobante.datos_extraidos = {**comprobante.datos_extraidos, **datos.a_json()}
+
+
+def describir_deuda(db: Session, deuda_id: uuid.UUID) -> str:
+    """Empresa, código y periodo de una deuda, para decir en qué deuda se usó un comprobante."""
+    fila = db.execute(
+        select(
+            func.coalesce(Servicio.alias, Empresa.nombre, Servicio.empresa_nombre),
+            Servicio.codigo_suministro,
+            Deuda.periodo,
+        )
+        .join(Servicio, Servicio.id == Deuda.servicio_id)
+        .outerjoin(Empresa, Empresa.id == Servicio.empresa_id)
+        .where(Deuda.id == deuda_id)
+    ).one()
+    nombre, codigo, periodo = fila
+    return f"{nombre or 'Servicio'} {codigo} ({MESES[periodo.month - 1]} {periodo.year})"
+
+
+def operacion_repetida(
+    db: Session, comprobante: Comprobante, entidad: Entidad, numero: str
+) -> Comprobante | None:
+    """Otro comprobante no rechazado con el mismo número de operación en la misma entidad. El
+    bloqueo consultivo turna a dos comprobantes con el mismo número procesados a la vez: el
+    segundo ve al primero y no choca con uq_comprobante_operacion."""
+    clave = f"comprobante_operacion:{entidad.value}:{numero}"
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(clave, 0))))
+    return db.scalar(
+        select(Comprobante).where(
+            Comprobante.entidad == entidad.value,
+            Comprobante.numero_operacion == numero,
+            Comprobante.estado != "rechazado",
+            Comprobante.id != comprobante.id,
+        )
+    )
+
+
+def explicar_duplicado(db: Session, comprobante: Comprobante, otro: Comprobante) -> str:
+    if otro.gerente_id != comprobante.gerente_id:
+        return ACCION_A_SEGUIR["duplicado"]
+    deudas = [describir_deuda(db, r.deuda_id) for r in repartos_de(db, otro.id)]
+    comprobante.datos_extraidos = {
+        **comprobante.datos_extraidos,
+        "duplicado_de": {
+            "comprobante_id": str(otro.id),
+            "deudas": [str(r.deuda_id) for r in repartos_de(db, otro.id)],
+        },
+    }
+    return (
+        f"Este comprobante ya se usó en {', '.join(deudas)}. Adjunta el comprobante de este pago."
+    )
+
+
+def repartos_de(db: Session, comprobante_id: uuid.UUID) -> list[ComprobanteDeuda]:
+    return list(
+        db.scalars(
+            select(ComprobanteDeuda)
+            .where(ComprobanteDeuda.comprobante_id == comprobante_id)
+            .order_by(ComprobanteDeuda.deuda_id)
+        )
+    )
+
+
+def explicar_faltantes(faltantes: list[CampoClave]) -> str:
+    nombres = [NOMBRES_CAMPOS[f] for f in faltantes]
+    lista = nombres[0] if len(nombres) == 1 else f"{', '.join(nombres[:-1])} y {nombres[-1]}"
+    return f"No se pudo leer {lista} del comprobante: lo revisa el gerente."
+
+
 def aplicar_lectura(
     db: Session, comprobante: Comprobante, lectura: LecturaOcr, ahora: datetime | None = None
 ) -> bool:
@@ -170,8 +265,25 @@ def aplicar_lectura(
     guardar_lectura(comprobante, lectura)
     if not lectura.lineas or lectura.confianza < UMBRAL_ILEGIBLE:
         resolver(db, comprobante, "rechazado", "ilegible", ACCION_A_SEGUIR["ilegible"], momento)
+        return True
+    datos = extraer(lectura)
+    guardar_datos(comprobante, datos)
+    if datos.entidad == Entidad.OTRA:
+        resolver(db, comprobante, "en_revision", None, MENSAJE_FORMATO_DESCONOCIDO, momento)
+        return True
+    if datos.numero_operacion is not None:
+        numero = datos.numero_operacion.valor
+        otro = operacion_repetida(db, comprobante, datos.entidad, numero)
+        if otro is not None:
+            mensaje = explicar_duplicado(db, comprobante, otro)
+            resolver(db, comprobante, "rechazado", "duplicado", mensaje, momento)
+            return True
+        comprobante.numero_operacion = numero
+    if datos.faltantes:
+        mensaje = explicar_faltantes(datos.faltantes)
+        resolver(db, comprobante, "en_revision", None, mensaje, momento)
     else:
-        resolver(db, comprobante, "en_revision", None, MENSAJE_SIN_EXTRACCION, momento)
+        resolver(db, comprobante, "en_revision", None, MENSAJE_SIN_REGLAS, momento)
     return True
 
 
