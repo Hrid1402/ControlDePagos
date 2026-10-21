@@ -36,7 +36,7 @@ from app.models import (
     Usuario,
 )
 from app.services.auditoria import nombre_de
-from app.services.comprobantes import ESTADOS_CON_INTENTO, ESTADOS_SIN_INTENTO, aplicado_en_curso
+from app.services.comprobantes import ESTADOS_CON_INTENTO, aplicado_en_curso
 from app.services.edicion_deudas import ESTADOS_EN_CURSO
 from app.services.linea_tiempo import Evento, linea_de_tiempo
 from app.services.pagos import acciones_de_pago
@@ -121,9 +121,8 @@ def acciones_de(
         acciones.append(AccionDeuda.INICIAR_PAGO)
     if pago.cancelar_inicio:
         acciones.append(AccionDeuda.CANCELAR_INICIO)
-    puede_adjuntar = deuda.estado in ESTADOS_CON_INTENTO or (
-        usuario.rol == "gerente" and deuda.estado in ESTADOS_SIN_INTENTO
-    )
+    # Solo la asistente sube el voucher del pago que inició (TASK-109).
+    puede_adjuntar = usuario.rol == "asistente" and deuda.estado in ESTADOS_CON_INTENTO
     if puede_adjuntar and deuda.monto is not None:
         disponible = deuda.monto - aplicado_de(db, deuda.id) - aplicado_en_curso(db, deuda.id)
         if disponible > 0:
