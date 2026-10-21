@@ -20,6 +20,11 @@ HORARIOS: dict[str, dict[str, Any]] = {
         "schedule": crontab(minute="*/5"),
         "options": {"expires": 4 * 60},
     },
+    "recuperar_comprobantes": {
+        "task": "app.workers.comprobantes.recuperar_comprobantes",
+        "schedule": crontab(minute="*/5"),
+        "options": {"expires": 4 * 60},
+    },
     "recordar_aprobaciones": {
         "task": "app.workers.aprobaciones.recordar_aprobaciones",
         "schedule": crontab(minute="*/15"),
