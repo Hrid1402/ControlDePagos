@@ -171,7 +171,8 @@ y la revisión programada los vuelve a encolar cuando el worker arranca.
 |---|---|---|
 | Subida | `app/services/comprobantes.py` | Guarda el archivo y encola `procesar_comprobante` tras el commit |
 | Lectura | `app/ocr/motor.py` | PDF hasta 2 páginas a 200 ppp; imágenes reducidas a 2000 px; texto y confianza por línea |
-| Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Con texto: revisión del gerente hasta que existan extractores y reglas |
+| Extracción | `app/ocr/extraccion.py` | Entidad por palabras clave (BCP, Interbank, BBVA, Scotiabank, Yape, Plin, Agente BCP y KasNet) y expresiones por entidad para operación, monto, moneda, fecha, empresa y código |
+| Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Operación ya usada en la misma entidad: rechazado por duplicado. Entidad desconocida o campo clave ausente: revisión. Datos completos: revisión hasta que existan las reglas (TASK-87) |
 | Avisos | `app/services/validacion.py` | Notificación y evento `comprobante_resultado` después del commit |
 | Recuperación | `recuperar_comprobantes`, cada 5 minutos | Vuelve a encolar lo que lleva 10 minutos en `procesando`; a la tercera vez lo deja en revisión |
 
@@ -184,6 +185,10 @@ Medición del objetivo de 10 s (contrato H24, punto 7): `tests/test_ocr_motor.py
 modelo ya cargado un comprobante sintético de una página. En un Mac con Apple Silicon (CPU, sin
 GPU) tarda 2,3 s; la carga del modelo, que se hace una vez por proceso, tarda unos 10 s. La
 prueba se omite si el grupo `ocr` no está instalado, como en la CI.
+
+Para agregar un formato: sus palabras clave en `CLAVES`, sus etiquetas en `ETIQUETAS` y un
+ejemplo inventado con su resultado esperado en `tests/ejemplos_comprobantes.py`. No se suben
+comprobantes reales al repositorio.
 
 ### Configuración
 
