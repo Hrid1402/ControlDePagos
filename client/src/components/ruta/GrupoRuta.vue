@@ -293,8 +293,11 @@ h2 {
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
-.accion:empty {
-  display: none;
+/* Ancho fijo para que los montos queden en columna, tengan o no botón. */
+.accion {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 196px;
 }
 button:focus-visible,
 input:focus-visible {
@@ -310,6 +313,15 @@ input:focus-visible {
   }
   .accion {
     grid-column: 2 / -1;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+  .accion:empty {
+    display: none;
+  }
+  /* En celular el ícono de la categoría le quita espacio al nombre. */
+  .icono {
+    display: none;
   }
 }
 </style>

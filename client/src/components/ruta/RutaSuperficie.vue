@@ -100,7 +100,7 @@ const iniciadas = computed(
               <strong>{{ nombre(r.deuda_id) }}</strong> ·
               {{
                 r.resultado === 'requiere_aprobacion'
-                  ? 'supera tu límite: se pidió la aprobación del gerente.'
+                  ? 'necesita la aprobación del gerente; ya se la pedimos.'
                   : r.mensaje
               }}
             </li>
