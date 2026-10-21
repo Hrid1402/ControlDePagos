@@ -175,6 +175,7 @@ y la revisión programada los vuelve a encolar cuando el worker arranca.
 | Resultado | `app/services/validacion.py` | Ilegible (sin texto o confianza menor a 0,6): rechazado. Operación ya usada en la misma entidad: rechazado por duplicado. Entidad desconocida o campo clave ausente: revisión |
 | Reglas | `app/services/reglas_comprobante.py` | Campo con confianza menor a 0,8, moneda o empresa distintas, o fecha dudosa: revisión. Código de otra deuda: rechazado, con la deuda propia que coincide como sugerencia. Monto igual (±0,10): validado; menor con una deuda: pago parcial; mayor: revisión |
 | Abonos | `app/services/abonos.py` | Con las deudas bloqueadas, vuelve a comprobar el saldo, aplica los abonos y deja la deuda pagada o pagada_parcial |
+| Revisión | `app/services/revision_comprobantes.py` | El gerente aprueba (con el reparto confirmado o uno corregido, sin superar saldos ni el monto) o rechaza con su motivo; repetir la misma decisión no tiene efectos nuevos |
 | Avisos | `app/services/validacion.py` | Notificación y evento `comprobante_resultado` después del commit |
 | Recuperación | `recuperar_comprobantes`, cada 5 minutos | Vuelve a encolar lo que lleva 10 minutos en `procesando`; a la tercera vez lo deja en revisión |
 

@@ -1,7 +1,8 @@
 """Comprobantes de pago (H24): subida, consulta y reemplazo del archivo.
 
 La asistente y el gerente adjuntan comprobantes de las deudas del gerente (CA09). El archivo va
-en multipart: archivo y deudas, una lista JSON de {deuda_id, monto_aplicado}.
+en multipart: archivo y deudas, una lista JSON de {deuda_id, monto_aplicado}. Solo el gerente
+aprueba o rechaza un comprobante en revisión (CA07); la asistente recibe 403 SIN_PERMISO.
 
 Errores: 404 NO_ENCONTRADO (comprobante o deuda inexistente o de otro gerente), 422 VALIDACION o
 MONEDA_DISTINTA, 409 DUPLICADO, SIN_INTENTO, ESTADO_NO_PERMITIDO, SIN_SALDO o YA_REEMPLAZADO y
@@ -14,10 +15,22 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile, status
 from pydantic import TypeAdapter, ValidationError
 
-from app.core.dependencias import GerenteId, OrigenSolicitud, SesionDb, UsuarioActual
+from app.core.dependencias import (
+    GerenteId,
+    OrigenSolicitud,
+    SesionDb,
+    SoloGerente,
+    UsuarioActual,
+)
 from app.core.errores import ErrorApi
 from app.models import Comprobante
-from app.schemas.comprobantes import ComprobanteSalida, RepartoComprobanteEntrada, RepartoSalida
+from app.schemas.comprobantes import (
+    AprobarEntrada,
+    ComprobanteSalida,
+    RechazarEntrada,
+    RepartoComprobanteEntrada,
+    RepartoSalida,
+)
 from app.services.archivos import confirmar_con_archivo, enlace_firmado, validar_archivo
 from app.services.comprobantes import (
     comprobante_visible,
@@ -26,6 +39,7 @@ from app.services.comprobantes import (
     repartos_de,
     subir_comprobante,
 )
+from app.services.revision_comprobantes import aprobar_comprobante, rechazar_comprobante
 
 router = APIRouter(prefix="/comprobantes", tags=["comprobantes"])
 
@@ -110,3 +124,30 @@ def reemplazar(
     )
     confirmar_con_archivo(db, comprobante.archivo_url)
     return comprobante_salida(db, comprobante, con_enlace=False)
+
+
+@router.post("/{comprobante_id}/aprobar")
+def aprobar(
+    comprobante_id: uuid.UUID,
+    db: SesionDb,
+    gerente: SoloGerente,
+    origen: OrigenSolicitud,
+    entrada: AprobarEntrada | None = None,
+) -> ComprobanteSalida:
+    deudas = entrada.deudas if entrada is not None else None
+    comprobante = aprobar_comprobante(db, gerente, comprobante_id, deudas, origen=origen)
+    db.commit()
+    return comprobante_salida(db, comprobante)
+
+
+@router.post("/{comprobante_id}/rechazar")
+def rechazar(
+    comprobante_id: uuid.UUID,
+    entrada: RechazarEntrada,
+    db: SesionDb,
+    gerente: SoloGerente,
+    origen: OrigenSolicitud,
+) -> ComprobanteSalida:
+    comprobante = rechazar_comprobante(db, gerente, comprobante_id, entrada.motivo, origen=origen)
+    db.commit()
+    return comprobante_salida(db, comprobante)

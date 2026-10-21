@@ -65,6 +65,8 @@ class Accion(StrEnum):
     DEUDA_CREADA = "deuda_creada"
     COMPROBANTE_SUBIDO = "comprobante_subido"
     COMPROBANTE_REEMPLAZADO = "comprobante_reemplazado"
+    COMPROBANTE_APROBADO = "comprobante_aprobado"
+    COMPROBANTE_RECHAZADO = "comprobante_rechazado"
 
 
 # Una clave que contiene alguno de estos fragmentos no se guarda en el detalle.

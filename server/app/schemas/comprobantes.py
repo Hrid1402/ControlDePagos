@@ -12,6 +12,16 @@ class RepartoComprobanteEntrada(BaseModel):
     monto_aplicado: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
 
 
+class AprobarEntrada(BaseModel):
+    """Sin deudas se aplica el reparto confirmado al subir; con deudas, el gerente lo corrige."""
+
+    deudas: list[RepartoComprobanteEntrada] | None = None
+
+
+class RechazarEntrada(BaseModel):
+    motivo: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
 class RepartoSalida(BaseModel):
     deuda_id: uuid.UUID
     monto_aplicado: Decimal
