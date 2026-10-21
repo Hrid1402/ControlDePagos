@@ -6,10 +6,8 @@ por un cliente en memoria: las pruebas no dependen de SeaweedFS.
 
 import io
 import uuid
-from typing import Any
 
 import pytest
-from botocore.exceptions import ClientError
 from fastapi import UploadFile
 from PIL import Image
 
@@ -25,6 +23,7 @@ from app.services.archivos import (
     validar_archivo,
     validar_contenido,
 )
+from tests.conftest import S3EnMemoria
 
 
 def imagen(formato: str, tamano: tuple[int, int] = (40, 30)) -> bytes:
@@ -35,41 +34,6 @@ def imagen(formato: str, tamano: tuple[int, int] = (40, 30)) -> bytes:
 
 def pdf() -> bytes:
     return imagen("PDF")
-
-
-class S3EnMemoria:
-    """Cliente S3 mínimo: guarda los objetos en un diccionario y puede fallar a pedido."""
-
-    def __init__(self) -> None:
-        self.objetos: dict[str, tuple[bytes, str]] = {}
-        self.falla = False
-
-    def _quizas_fallar(self, operacion: str) -> None:
-        if self.falla:
-            raise ClientError({"Error": {"Code": "500", "Message": "caído"}}, operacion)
-
-    def put_object(self, Bucket: str, Key: str, Body: bytes, ContentType: str) -> None:
-        self._quizas_fallar("PutObject")
-        self.objetos[Key] = (Body, ContentType)
-
-    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
-        self._quizas_fallar("GetObject")
-        return {"Body": io.BytesIO(self.objetos[Key][0])}
-
-    def delete_object(self, Bucket: str, Key: str) -> None:
-        self._quizas_fallar("DeleteObject")
-        self.objetos.pop(Key, None)
-
-    def generate_presigned_url(self, operacion: str, Params: dict[str, str], ExpiresIn: int) -> str:
-        self._quizas_fallar("GeneratePresignedUrl")
-        return f"https://s3.local/{Params['Key']}?expira={ExpiresIn}"
-
-
-@pytest.fixture
-def s3(monkeypatch: pytest.MonkeyPatch) -> S3EnMemoria:
-    cliente = S3EnMemoria()
-    monkeypatch.setattr(archivos, "cliente_s3", lambda: cliente)
-    return cliente
 
 
 @pytest.mark.parametrize(
