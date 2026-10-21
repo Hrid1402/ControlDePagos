@@ -37,6 +37,12 @@ export const rutas: RouteRecordRaw[] = [
           meta: { libre: true, titulo: 'Revisión del detalle de deuda' },
         },
         {
+          path: '/revision/bandeja',
+          name: 'revision-bandeja',
+          component: () => import('@/pages/BandejaRevisionPage.vue'),
+          meta: { libre: true, titulo: 'Revisión de la bandeja' },
+        },
+        {
           path: '/revision/deuda',
           name: 'revision-deuda',
           component: () => import('@/pages/DeudaRevisionPage.vue'),
