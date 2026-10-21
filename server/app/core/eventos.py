@@ -56,6 +56,8 @@ class TipoEvento(StrEnum):
     ORDEN_ACEPTADA = "orden_aceptada"
     ORDEN_RECHAZADA = "orden_rechazada"
     ORDEN_CANCELADA = "orden_cancelada"
+    # Resultado de la validación de un comprobante (app/services/validacion.py).
+    COMPROBANTE_RESULTADO = "comprobante_resultado"
 
 
 @dataclass(frozen=True)
