@@ -83,6 +83,7 @@ def aplicar_abonos(
         deuda.pago_iniciado_por = None
         deuda.pago_iniciado_en = None
         deuda.pago_realizado = False
+        deuda.pago_realizado_en = None
         deuda.recordatorios_enviados = 0
         if deuda.estado == "pagada" and gerente is not None:
             notificar(

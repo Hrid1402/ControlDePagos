@@ -146,6 +146,7 @@ def test_un_pago_declarado_no_se_cancela(db: Session, dos_gerentes: DosGerentes,
     equipo = dos_gerentes.uno
     deuda = iniciada(db, equipo.asistente, equipo.gerente)
     deuda.pago_realizado = True
+    deuda.pago_realizado_en = datetime.now(UTC)
     db.flush()
 
     error = error_de(lambda: cancelar(db, getattr(equipo, rol), deuda, "Revisión"))
@@ -251,5 +252,6 @@ def test_acciones_de_pago_siguen_las_reglas_del_servicio(
     assert acciones_de_pago(db, deuda, actual) == AccionesPago(False, False)
 
     deuda.pago_realizado = True
+    deuda.pago_realizado_en = datetime.now(UTC)
     db.flush()
     assert acciones_de_pago(db, deuda, equipo.gerente) == AccionesPago(False, False)

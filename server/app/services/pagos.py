@@ -317,6 +317,7 @@ def iniciar_pago(
     deuda.pago_iniciado_por = usuario.id
     deuda.pago_iniciado_en = momento
     deuda.pago_realizado = False
+    deuda.pago_realizado_en = None
     deuda.recordatorios_enviados = 0
     detalle |= {"moneda": deuda.moneda, "autorizacion": autorizacion.value}
     registrar_auditoria(

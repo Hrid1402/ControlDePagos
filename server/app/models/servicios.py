@@ -125,6 +125,7 @@ class Deuda(ConId, ConActualizado, Base):
         ForeignKey("usuario.id"), index=True
     )
     pago_realizado: Mapped[bool] = mapped_column(server_default=text("false"))
+    pago_realizado_en: Mapped[datetime | None]
     recordatorios_enviados: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     pagada_fuera_en: Mapped[datetime | None]
     creado_por: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("usuario.id"), index=True)
