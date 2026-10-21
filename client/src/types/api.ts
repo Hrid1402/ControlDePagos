@@ -11,4 +11,6 @@ export interface ErrorApi {
   code: string
   detail: string
   field: string | null
+  /** Claves adicionales del error, como deuda_existente en un 409 DUPLICADO. */
+  datos?: Record<string, unknown>
 }

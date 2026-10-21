@@ -21,7 +21,14 @@ export function normalizarError(error: unknown): ErrorApi {
     }
   }
   const datos = error.response.data
+  const extra =
+    datos && typeof datos === 'object'
+      ? Object.fromEntries(
+          Object.entries(datos).filter(([clave]) => !['detail', 'code', 'field'].includes(clave)),
+        )
+      : {}
   return {
+    ...(Object.keys(extra).length ? { datos: extra } : {}),
     status: error.response.status,
     code: typeof datos?.code === 'string' ? datos.code : 'ERROR_HTTP',
     detail:
