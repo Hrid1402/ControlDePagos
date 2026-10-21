@@ -91,7 +91,7 @@ function cerrar() {
     <PestanasEspacio :rol="rol" />
     <main id="contenido" class="hoja" tabindex="-1"><RouterView /></main>
     <ModalPolitica v-if="politicaPendiente" @aceptada="politicaPendiente = false" @salir="cerrar" />
-    <Toast group="notificacion" position="top-right">
+    <Toast group="notificacion" position="bottom-right">
       <template #message="{ message }">
         <div class="aviso">
           <strong>{{ message.summary }}</strong>
