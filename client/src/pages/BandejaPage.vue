@@ -83,6 +83,17 @@ function abrir(id: string) {
   void router.push({ name: `${sesion.rol}-deuda`, params: { id } })
 }
 
+// Modo ventanilla (H18) todavía no tiene pantalla propia: mientras tanto, el detalle de la deuda
+// permite iniciar el pago y adjuntar el comprobante.
+function ventanilla(id: string) {
+  abrir(id)
+}
+
+// CA12: lo seleccionado pasa a la ruta de pagos (H23), que vuelve a validar cada deuda al iniciar.
+function agregarRuta() {
+  void router.push({ name: 'asistente-ruta', query: { deudas: seleccion.value.join(',') } })
+}
+
 function avisarError(fallo: unknown) {
   toast.add({
     severity: 'error',
@@ -201,6 +212,8 @@ async function adjuntar(evento: Event) {
     @fijar="fijar"
     @posponer="posponer"
     @adjuntar="elegirComprobante"
+    @ventanilla="ventanilla"
+    @agregar-ruta="agregarRuta"
     @reintentar="cargar()"
   />
   <input
