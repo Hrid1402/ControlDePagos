@@ -10,6 +10,7 @@
     "dev": "concurrently -n client,server,worker,beat -c blue,green,yellow,magenta \"pnpm --filter client dev\" \"pnpm dev:server\" \"pnpm worker:server\" \"pnpm beat:server\"",
     "dev:server": "cd server && uv run uvicorn app.main:app --reload --port 8000",
     "worker:server": "cd server && FORKED_BY_MULTIPROCESSING=1 uv run watchfiles --filter python 'celery -A app.workers.celery_app:celery_app worker -Q general --concurrency=2 --loglevel=INFO' app",
+    "worker:ocr": "cd server && FORKED_BY_MULTIPROCESSING=1 OCR_PRECARGAR=true PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True uv run --group ocr celery -A app.workers.celery_app:celery_app worker -Q ocr --concurrency=1 --loglevel=INFO",
     "beat:server": "cd server && uv run celery -A app.workers.celery_app:celery_app beat --schedule=celerybeat-schedule --loglevel=INFO",
     "init:gerente": "cd server && uv run python -m app.comandos.inicializar_gerente",
     "lint": "pnpm lint:client && pnpm lint:server",
