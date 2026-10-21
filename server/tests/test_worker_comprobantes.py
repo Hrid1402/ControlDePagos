@@ -19,14 +19,18 @@ from app.core.eventos import Evento
 from app.core.tiempo import ahora_lima
 from app.models import Comprobante, Deuda, Notificacion
 from app.ocr.motor import ErrorOcr, LecturaOcr, Linea
-from app.services.validacion import ACCION_A_SEGUIR, MENSAJE_SIN_LECTURA, MENSAJE_SIN_REGLAS
+from app.services.validacion import (
+    ACCION_A_SEGUIR,
+    MENSAJE_FORMATO_DESCONOCIDO,
+    MENSAJE_SIN_LECTURA,
+)
 from app.workers import base
 from app.workers import comprobantes as modulo
 from tests.conftest import DosGerentes, Equipo, S3EnMemoria, nueva_deuda, nuevo_comprobante
 from tests.ejemplos_comprobantes import EJEMPLOS
 
-# Constancia completa del banco de ejemplos: extrae todos sus campos clave.
-LEGIBLE = next(e for e in EJEMPLOS if e.nombre == "bcp_app").lectura()
+# Legible pero de una entidad que no se valida sola: queda en revisión del gerente.
+LEGIBLE = next(e for e in EJEMPLOS if e.nombre == "entidad_desconocida").lectura()
 
 
 @pytest.fixture
@@ -87,10 +91,11 @@ def test_un_comprobante_legible_pasa_a_revision_del_gerente(
     db.refresh(comprobante)
     db.refresh(deuda)
     assert (comprobante.estado, comprobante.motivo_codigo) == ("en_revision", None)
-    assert comprobante.texto_ocr is not None and comprobante.texto_ocr.startswith("BCP\n")
+    assert comprobante.texto_ocr is not None
+    assert comprobante.texto_ocr.startswith("Caja Municipal\n")
     assert str(comprobante.confianza) == "0.980"
-    assert (comprobante.entidad, comprobante.numero_operacion) == ("bcp", "00456789")
-    assert comprobante.datos_extraidos["observacion"] == MENSAJE_SIN_REGLAS
+    assert (comprobante.entidad, comprobante.numero_operacion) == ("otra", None)
+    assert comprobante.datos_extraidos["observacion"] == MENSAJE_FORMATO_DESCONOCIDO
     assert deuda.estado == "por_validar"
     (aviso,) = notificaciones(db, "comprobante_en_revision")
     assert (aviso.usuario_id, aviso.deuda_id) == (equipo.gerente.id, deuda.id)
@@ -214,7 +219,7 @@ def test_un_fallo_pasajero_se_resuelve_en_el_reintento(
     assert modulo.procesar_comprobante.apply(args=(str(comprobante.id),)).get() == "en_revision"
 
     db.refresh(comprobante)
-    assert comprobante.datos_extraidos["observacion"] == MENSAJE_SIN_REGLAS
+    assert comprobante.datos_extraidos["observacion"] == MENSAJE_FORMATO_DESCONOCIDO
 
 
 def test_la_recuperacion_vuelve_a_encolar_los_comprobantes_perdidos(
