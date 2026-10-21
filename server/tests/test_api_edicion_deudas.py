@@ -13,8 +13,15 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.main import app
 from app.models import Deuda, HistorialMonto, Notificacion, Servicio
-from tests.conftest import DosGerentes, nueva_categoria, nueva_deuda, nuevo_comprobante
+from tests.conftest import (
+    DosGerentes,
+    S3EnMemoria,
+    nueva_categoria,
+    nueva_deuda,
+    nuevo_comprobante,
+)
 from tests.test_api_comprobantes import cabecera
+from tests.test_archivos import imagen, pdf
 
 
 @pytest.fixture
@@ -137,3 +144,25 @@ def test_un_servicio_que_no_es_prestamo_no_admite_cuotas(
     r = cliente.post("/api/v1/prestamos", headers=cabecera(dos_gerentes.uno.gerente), json=cuerpo)
 
     assert (r.status_code, r.json()["field"]) == (422, "servicio_id")
+
+
+def test_adjunta_y_reemplaza_el_recibo_en_privado(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes, s3: S3EnMemoria
+) -> None:
+    equipo = dos_gerentes.uno
+    deuda = nueva_deuda(db, equipo.gerente)
+    ruta = f"/api/v1/deudas/{deuda.id}/recibo"
+
+    r = cliente.post(ruta, headers=cabecera(equipo.asistente), files={"archivo": ("r.pdf", pdf())})
+    assert r.status_code == 200, r.json()
+    assert r.json()["recibo_enlace"].startswith("https://s3.local/recibos/")
+    primero = set(s3.objetos)
+    cliente.post(
+        ruta, headers=cabecera(equipo.gerente), files={"archivo": ("r.png", imagen("PNG"))}
+    )
+    assert len(s3.objetos) == 1 and set(s3.objetos) != primero
+
+    deuda.estado = "anulada"
+    db.flush()
+    r = cliente.post(ruta, headers=cabecera(equipo.gerente), files={"archivo": ("r.pdf", pdf())})
+    assert (r.status_code, r.json()["code"]) == (409, "ESTADO_NO_PERMITIDO")
