@@ -34,6 +34,9 @@ class DeudaPagoSalida(BaseModel):
     saldo: Decimal | None
     pago_iniciado_en: datetime | None
     pago_iniciado_por: uuid.UUID | None
+    # Declarado en la ruta (H23 CA03): la deuda sigue en proceso hasta validar el comprobante.
+    pago_realizado: bool
+    pago_realizado_en: datetime | None
 
 
 class InicioPagoSalida(BaseModel):

@@ -58,6 +58,9 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/deudas/{deuda_id}/cancelar-inicio"): (
         "asistente ajena: test_api_pagos::test_la_deuda_de_otro_gerente_responde_404"
     ),
+    ("POST", "/api/v1/deudas/{deuda_id}/marcar-pagada"): (
+        "asistente ajena: test_api_ruta::test_la_deuda_de_otro_gerente_responde_404"
+    ),
     ("POST", "/api/v1/deudas/{deuda_id}/fijar"): (
         "asistente ajena: test_api_bandeja::test_dos_gerentes_no_ven_ni_tocan_deudas_ajenas; "
         "gerente propio: test_api_bandeja::test_permisos_y_validacion"

@@ -1,4 +1,4 @@
-"""Inicio y cancelación del pago presencial (H22, compartido con H05, H19 y H23).
+"""Inicio, declaración y cancelación del pago presencial (H22, compartido con H05, H19 y H23).
 
 Errores: 404 NO_ENCONTRADO (deuda inexistente o de otro gerente), 403 SIN_PERMISO y 409
 PAGO_EN_CURSO, APROBACION_PENDIENTE, ESTADO_NO_PERMITIDO, SIN_SALDO, SIN_INTENTO,
@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body
 from app.core.dependencias import OrigenSolicitud, SesionDb, UsuarioActual
 from app.models import Deuda
 from app.schemas.pagos import CancelarInicioEntrada, DeudaPagoSalida, InicioPagoSalida
-from app.services.pagos import cancelar_inicio, iniciar_pago
+from app.services.pagos import cancelar_inicio, iniciar_pago, marcar_pagada
 from app.services.saldo import saldo_de
 
 router = APIRouter(prefix="/deudas", tags=["pagos"])
@@ -30,6 +30,8 @@ def deuda_salida(db: SesionDb, deuda: Deuda) -> DeudaPagoSalida:
             "saldo": saldo_de(db, deuda),
             "pago_iniciado_en": deuda.pago_iniciado_en,
             "pago_iniciado_por": deuda.pago_iniciado_por,
+            "pago_realizado": deuda.pago_realizado,
+            "pago_realizado_en": deuda.pago_realizado_en,
         }
     )
 
@@ -47,6 +49,16 @@ def iniciar(
         solicitud_id=inicio.solicitud.id if inicio.solicitud else None,
         deuda=deuda_salida(db, inicio.deuda),
     )
+
+
+@router.post("/{deuda_id}/marcar-pagada")
+def marcar(
+    deuda_id: uuid.UUID, db: SesionDb, usuario: UsuarioActual, origen: OrigenSolicitud
+) -> DeudaPagoSalida:
+    """Declara hecho el pago en curso; la deuda sigue en proceso hasta validar el comprobante."""
+    deuda = marcar_pagada(db, usuario, deuda_id, origen=origen)
+    db.commit()
+    return deuda_salida(db, deuda)
 
 
 @router.post("/{deuda_id}/cancelar-inicio")

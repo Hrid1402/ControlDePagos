@@ -1,4 +1,5 @@
-"""Inicio, reserva y cancelación del pago presencial: servicio común de H05, H19, H22, H23 y H28.
+"""Inicio, reserva, declaración y cancelación del pago presencial: servicio común de H05, H19,
+H22, H23 y H28.
 
 El intento vive en la deuda: en_proceso con su dueño (pago_iniciado_por) y su fecha
 (pago_iniciado_en). No se crean filas en pago, que es del pago automático (H21) y exige un medio
@@ -317,6 +318,7 @@ def iniciar_pago(
     deuda.pago_iniciado_por = usuario.id
     deuda.pago_iniciado_en = momento
     deuda.pago_realizado = False
+    deuda.pago_realizado_en = None
     deuda.recordatorios_enviados = 0
     detalle |= {"moneda": deuda.moneda, "autorizacion": autorizacion.value}
     registrar_auditoria(
@@ -384,6 +386,43 @@ def cancelar_inicio(
         # La ventanilla del dueño se cierra: su intento ya no está vigente.
         datos = {"deuda_id": str(deuda.id), "estado": deuda.estado}
         publicar_tras_commit(db, dueno_id, Evento(TipoEvento.PAGO_CANCELADO, datos))
+    return deuda
+
+
+def marcar_pagada(
+    db: Session,
+    usuario: Usuario,
+    deuda_id: uuid.UUID,
+    *,
+    origen: Origen,
+    ahora: datetime | None = None,
+) -> Deuda:
+    """Declara hecho el pago presencial en curso (H23 CA03).
+
+    No cierra la deuda: sigue en proceso, con su reserva, hasta que se valide el comprobante. Solo
+    lo declara quien inició el intento. Repetirlo conserva la primera fecha y no audita de nuevo.
+    """
+    gerente_id = gerente_de(usuario)
+    if gerente_id is None:
+        raise sin_permiso()
+    deuda = bloquear_deuda(db, deuda_id, gerente_id)
+    if deuda.estado != "en_proceso":
+        raise ErrorApi(409, "SIN_INTENTO", "La deuda no tiene un pago en curso que declarar.")
+    if deuda.pago_iniciado_por != usuario.id:
+        raise ErrorApi(409, "PAGO_EN_CURSO", "Otra persona está pagando esta deuda.")
+    if deuda.pago_realizado:
+        return deuda
+    deuda.pago_realizado = True
+    deuda.pago_realizado_en = ahora or ahora_lima()
+    registrar_auditoria(
+        db,
+        usuario,
+        Accion.PAGO_DECLARADO,
+        "deuda",
+        deuda.id,
+        {"iniciado_en": deuda.pago_iniciado_en, "realizado_en": deuda.pago_realizado_en},
+        origen=origen,
+    )
     return deuda
 
 

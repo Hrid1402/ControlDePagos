@@ -40,6 +40,7 @@ class Accion(StrEnum):
     CONTRASENA_RESTABLECIDA = "contrasena_restablecida"
     PAGO_INICIADO = "pago_iniciado"
     PAGO_INICIO_CANCELADO = "pago_inicio_cancelado"
+    PAGO_DECLARADO = "pago_declarado"
     APROBACION_SOLICITADA = "aprobacion_solicitada"
     APROBACION_APROBADA = "aprobacion_aprobada"
     APROBACION_RECHAZADA = "aprobacion_rechazada"
