@@ -13,6 +13,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from botocore.exceptions import ClientError
+from celery.canvas import Signature
 from sqlalchemy.orm import Session
 
 os.environ["DATABASE_URL"] = os.environ.get(
@@ -34,6 +35,7 @@ from app.models import (  # noqa: E402
     Usuario,
 )
 from app.services import archivos  # noqa: E402
+from app.workers import encolar as modulo_encolar  # noqa: E402
 
 
 @dataclass
@@ -96,6 +98,20 @@ def publicados(monkeypatch: pytest.MonkeyPatch) -> list[tuple[uuid.UUID, Evento]
         return True
 
     monkeypatch.setattr(eventos, "publicar", capturar)
+    return salida
+
+
+@pytest.fixture
+def enviadas(monkeypatch: pytest.MonkeyPatch) -> list[Signature]:
+    """Captura las tareas que se encolan tras el commit en lugar de enviarlas a Redis, donde las
+    tomaría el worker local."""
+    salida: list[Signature] = []
+
+    def capturar(firma: Signature) -> bool:
+        salida.append(firma)
+        return True
+
+    monkeypatch.setattr(modulo_encolar, "encolar", capturar)
     return salida
 
 
