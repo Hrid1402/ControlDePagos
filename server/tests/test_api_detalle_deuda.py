@@ -53,7 +53,7 @@ def test_muestra_abonos_comprobantes_historial_y_linea_de_tiempo(
     assert "deuda_creada" in tipos and "comprobante_validado" in tipos
     evento = next(e for e in cuerpo["linea_tiempo"] if e["tipo"] == "comprobante_validado")
     assert (evento["actor"], evento["detalle"]["comprobante_id"]) == (None, str(validado.id))
-    assert cuerpo["acciones"] == ["iniciar_pago", "comentar"]
+    assert cuerpo["acciones"] == ["iniciar_pago", "editar", "comentar"]
 
 
 def test_en_proceso_ofrece_adjuntar_y_cancelar_a_quien_paga(
@@ -67,7 +67,7 @@ def test_en_proceso_ofrece_adjuntar_y_cancelar_a_quien_paga(
     r = cliente.get(f"/api/v1/deudas/{deuda.id}", headers=cabecera(equipo.asistente))
 
     cuerpo = r.json()
-    assert cuerpo["acciones"] == ["cancelar_inicio", "adjuntar_comprobante", "comentar"]
+    assert cuerpo["acciones"] == ["cancelar_inicio", "adjuntar_comprobante", "editar", "comentar"]
     assert cuerpo["en_proceso"]["rol"] == "asistente"
 
 
