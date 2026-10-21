@@ -100,13 +100,9 @@ RUTAS_CON_ID: dict[tuple[str, str], str] = {
     # Solicitudes de aprobación (TASK-24): las celdas están en MATRIZ.
     ("POST", "/api/v1/solicitudes/{solicitud_id}/aprobar"): "MATRIZ",
     ("POST", "/api/v1/solicitudes/{solicitud_id}/rechazar"): "MATRIZ",
-    ("GET", "/api/v1/deudas/{deuda_id}/comentarios"): (
-        "asistente ajena: test_api_comentarios::"
-        "test_anulada_no_admite_comentarios_y_otro_gerente_no_los_ve"
-    ),
-    ("POST", "/api/v1/deudas/{deuda_id}/comentarios"): (
-        "asistente ajena: test_api_comentarios::"
-        "test_anulada_no_admite_comentarios_y_otro_gerente_no_los_ve"
+    ("GET", "/api/v1/deudas/{deuda_id}"): (
+        "asistente ajena e id inexistente: "
+        "test_api_detalle_deuda::test_la_deuda_de_otro_gerente_responde_404"
     ),
     # Comprobantes (TASK-84): probadas en sus archivos.
     ("GET", "/api/v1/comprobantes/{comprobante_id}"): (
