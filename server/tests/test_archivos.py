@@ -4,7 +4,6 @@ El tipo se decide por el contenido, no por el content_type ni por la extensión.
 por un cliente en memoria: las pruebas no dependen de SeaweedFS.
 """
 
-import asyncio
 import io
 import uuid
 from typing import Any
@@ -129,11 +128,11 @@ def test_acepta_10_mb_exactos_y_rechaza_uno_mas() -> None:
 def test_valida_el_archivo_subido_sin_confiar_en_su_content_type() -> None:
     # Un PNG enviado como PDF se guarda como PNG; texto enviado como imagen se rechaza.
     png = UploadFile(io.BytesIO(imagen("PNG")), headers={"content-type": "application/pdf"})
-    assert asyncio.run(validar_archivo(png)).extension == "png"
+    assert validar_archivo(png).extension == "png"
 
     texto = UploadFile(io.BytesIO(b"hola"), headers={"content-type": "image/png"})
     with pytest.raises(ErrorApi, match="Solo se admiten"):
-        asyncio.run(validar_archivo(texto))
+        validar_archivo(texto)
 
 
 def test_guarda_lee_y_elimina_en_la_ruta_privada(s3: S3EnMemoria) -> None:

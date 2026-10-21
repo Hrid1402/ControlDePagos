@@ -11,6 +11,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errores import ErrorApi
@@ -75,9 +76,11 @@ def validar_contenido(contenido: bytes) -> ArchivoValidado:
     return ArchivoValidado(contenido, TIPOS[tipo], tipo, hashlib.sha256(contenido).hexdigest())
 
 
-async def validar_archivo(archivo: UploadFile) -> ArchivoValidado:
-    # Lee un byte más del límite para distinguir un archivo de 10 MB exactos de uno mayor.
-    return validar_contenido(await archivo.read(MAXIMO_BYTES + 1))
+def validar_archivo(archivo: UploadFile) -> ArchivoValidado:
+    """Lectura síncrona: las rutas que suben archivos son def y corren en el pool de hilos, así
+    la base y S3 no bloquean el bucle de eventos. Lee un byte más del límite para distinguir un
+    archivo de 10 MB exactos de uno mayor."""
+    return validar_contenido(archivo.file.read(MAXIMO_BYTES + 1))
 
 
 def guardar_privado(ruta: str, archivo: ArchivoValidado) -> None:
@@ -107,6 +110,16 @@ def eliminar_privado(ruta: str) -> None:
         cliente_s3().delete_object(Bucket=settings.s3_bucket, Key=ruta)
     except (BotoCoreError, ClientError):
         pass
+
+
+def confirmar_con_archivo(db: Session, ruta: str) -> None:
+    """Confirma la transacción que registró el archivo guardado en ruta. Si el commit falla, borra
+    el archivo para no dejarlo huérfano y propaga el error."""
+    try:
+        db.commit()
+    except BaseException:
+        eliminar_privado(ruta)
+        raise
 
 
 def ruta_comprobante(gerente_id: uuid.UUID, comprobante_id: uuid.UUID, extension: str) -> str:
