@@ -85,3 +85,24 @@ export function totalesSeleccion(items: ItemBandeja[]): Partial<Record<Moneda, n
   }
   return totales
 }
+
+/** La pestaña y la categoría viven en la URL: se conservan al volver del detalle. */
+export function consultaDeQuery(query: Record<string, unknown>): {
+  pestana: Pestana
+  categoria: string
+} {
+  const pestana = PESTANAS.find((p) => p.valor === query.pestana)?.valor ?? 'por_pagar'
+  const categoria = typeof query.categoria === 'string' ? query.categoria : ''
+  return { pestana, categoria }
+}
+
+/** Solo lo que difiere de la vista inicial, para que la URL de inicio quede limpia. */
+export function queryDeConsulta(consulta: {
+  pestana: Pestana
+  categoria: string
+}): Record<string, string> {
+  const query: Record<string, string> = {}
+  if (consulta.pestana !== 'por_pagar') query.pestana = consulta.pestana
+  if (consulta.categoria) query.categoria = consulta.categoria
+  return query
+}
