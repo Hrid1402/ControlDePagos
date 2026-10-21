@@ -7,6 +7,7 @@ from app.api.v1 import (
     bandeja,
     calendario,
     categorias,
+    comentarios,
     comprobantes,
     deudas,
     empresas,
@@ -29,6 +30,7 @@ router.include_router(auth.router)
 router.include_router(bandeja.router)
 router.include_router(calendario.router)
 router.include_router(categorias.router)
+router.include_router(comentarios.router)
 router.include_router(comprobantes.router)
 router.include_router(deudas.router)
 router.include_router(empresas.router)
