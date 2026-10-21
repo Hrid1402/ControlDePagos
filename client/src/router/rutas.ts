@@ -73,6 +73,12 @@ export const rutas: RouteRecordRaw[] = [
         component: seccion.pagina ?? (() => import('@/pages/SeccionPendientePage.vue')),
         meta: { titulo: seccion.etiqueta },
       })),
+      {
+        path: 'deudas/:id',
+        name: `${rol}-deuda`,
+        component: () => import('@/pages/DeudaDetallePage.vue'),
+        meta: { titulo: 'Deuda' },
+      },
       ...(rol === 'gerente'
         ? [
             {
