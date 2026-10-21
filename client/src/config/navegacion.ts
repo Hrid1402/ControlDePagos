@@ -27,6 +27,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Deudas',
       descripcion: 'Todas tus deudas, con búsqueda y filtros por estado, mes y servicio.',
       principal: true,
+      pagina: () => import('@/pages/DeudasPage.vue'),
     },
     {
       clave: 'calendario',
