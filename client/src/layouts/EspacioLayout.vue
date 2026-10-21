@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
+import Toast from 'primevue/toast'
+import { useToast } from 'primevue/usetoast'
 import { controlSesionKey } from '@/services/controlSesion'
 import { useSesionStore } from '@/stores/sesion'
 import { INICIO_POR_ROL } from '@/router/guard'
@@ -30,6 +32,28 @@ onMounted(async () => {
     politicaPendiente.value = false
   }
 })
+// Lo que llega por tiempo real se avisa al momento; el gerente se entera así del voucher que
+// tiene que validar (TASK-109). El centro de notificaciones es TASK-98.
+const toast = useToast()
+const dejarDeEscuchar = control?.canal.suscribir((evento) => {
+  if (evento.tipo !== 'notificacion' || !evento.datos?.aviso) return
+  const datos = evento.datos as { titulo?: string; mensaje?: string; deuda_id?: string | null }
+  toast.add({
+    group: 'notificacion',
+    severity: 'info',
+    summary: datos.titulo,
+    // detail admite cualquier valor: lleva el texto y la deuda para el enlace «Ver la deuda».
+    detail: { texto: datos.mensaje, deuda: datos.deuda_id ?? null },
+    life: 12000,
+  })
+})
+onBeforeUnmount(() => dejarDeEscuchar?.())
+
+function verDeuda(id: string) {
+  toast.removeGroup('notificacion')
+  void router.push({ name: `${rol.value}-deuda`, params: { id } })
+}
+
 function cerrar() {
   const salir = () => {
     sesion.cerrar()
@@ -67,10 +91,44 @@ function cerrar() {
     <PestanasEspacio :rol="rol" />
     <main id="contenido" class="hoja" tabindex="-1"><RouterView /></main>
     <ModalPolitica v-if="politicaPendiente" @aceptada="politicaPendiente = false" @salir="cerrar" />
+    <Toast group="notificacion" position="bottom-right">
+      <template #message="{ message }">
+        <div class="aviso">
+          <strong>{{ message.summary }}</strong>
+          <p>{{ message.detail.texto }}</p>
+          <button v-if="message.detail.deuda" type="button" @click="verDeuda(message.detail.deuda)">
+            Ver la deuda
+          </button>
+        </div>
+      </template>
+    </Toast>
   </div>
 </template>
 
 <style scoped>
+.aviso {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+}
+.aviso p {
+  margin: 0;
+  font-size: var(--texto-sm);
+  line-height: 1.45;
+}
+.aviso button {
+  justify-self: start;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--deconsta-primary);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
 .espacio {
   display: flex;
   flex-direction: column;

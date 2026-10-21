@@ -72,7 +72,7 @@ export function motivo(item: ItemBandeja): { texto: string; tono: string; icono:
 export const COMPROBANTES: Record<string, string> = {
   procesando: 'Validando el comprobante',
   en_revision: 'El gerente revisa el comprobante',
-  por_confirmar: 'Comprobante por confirmar',
+  por_confirmar: 'El gerente valida el comprobante',
   rechazado: 'Comprobante rechazado: adjunta otro',
 }
 

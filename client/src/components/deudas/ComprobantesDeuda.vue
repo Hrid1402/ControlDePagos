@@ -1,11 +1,23 @@
 <script setup lang="ts">
+import Button from 'primevue/button'
 import { fechaHora, RESULTADOS_COMPROBANTE, type ComprobanteDeLaDeuda } from './detalle'
 import { importe } from './modelo'
 
 // H17 CA03: los comprobantes de la deuda con el resultado de su validación y, si no se validó, el
-// motivo y la acción a seguir. Solo los validados cuentan como abono (CA09).
-defineProps<{ comprobantes: ComprobanteDeLaDeuda[] }>()
-const emit = defineEmits<{ abrir: [id: string] }>()
+// motivo y la acción a seguir. Solo los validados cuentan como abono (CA09). El gerente valida o
+// rechaza con un clic los que esperan su decisión (H24 CA07, TASK-109).
+withDefaults(
+  defineProps<{
+    comprobantes: ComprobanteDeLaDeuda[]
+    /** El gerente decide los vouchers por confirmar o en revisión. */
+    puedeValidar?: boolean
+    /** Voucher con una decisión en curso. */
+    ocupado?: string | null
+  }>(),
+  { puedeValidar: false, ocupado: null },
+)
+const emit = defineEmits<{ abrir: [id: string]; validar: [id: string]; rechazar: [id: string] }>()
+const porDecidir = (c: ComprobanteDeLaDeuda) => ['por_confirmar', 'en_revision'].includes(c.estado)
 </script>
 
 <template>
@@ -33,6 +45,25 @@ const emit = defineEmits<{ abrir: [id: string] }>()
           <p v-if="c.observacion && c.estado !== 'validado'" class="observacion">
             {{ c.observacion }}
           </p>
+          <div v-if="puedeValidar && porDecidir(c)" class="decision">
+            <Button
+              label="Validar pago"
+              icon="pi pi-check"
+              size="small"
+              :loading="ocupado === c.id"
+              :disabled="!!ocupado && ocupado !== c.id"
+              @click="emit('validar', c.id)"
+            />
+            <Button
+              label="Rechazar"
+              icon="pi pi-times"
+              size="small"
+              severity="danger"
+              outlined
+              :disabled="!!ocupado"
+              @click="emit('rechazar', c.id)"
+            />
+          </div>
         </div>
         <button
           type="button"
@@ -130,6 +161,12 @@ p {
 .tono-peligro .observacion {
   background: var(--deconsta-error-fondo);
   color: var(--deconsta-error);
+}
+.decision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 .ver {
   min-height: 36px;

@@ -97,7 +97,7 @@ export const RESULTADOS_COMPROBANTE: Record<
   { etiqueta: string; tono: 'exito' | 'info' | 'peligro' | 'proceso'; icono: string }
 > = {
   procesando: { etiqueta: 'Validando', tono: 'proceso', icono: 'pi-spinner' },
-  por_confirmar: { etiqueta: 'Por confirmar', tono: 'info', icono: 'pi-hourglass' },
+  por_confirmar: { etiqueta: 'Por validar del gerente', tono: 'info', icono: 'pi-hourglass' },
   en_revision: { etiqueta: 'En revisión', tono: 'info', icono: 'pi-eye' },
   validado: { etiqueta: 'Validado', tono: 'exito', icono: 'pi-check-circle' },
   rechazado: { etiqueta: 'Rechazado', tono: 'peligro', icono: 'pi-times-circle' },

@@ -50,7 +50,7 @@ def test_guarda_los_campos_extraidos_del_comprobante(
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert (resultado.estado, resultado.motivo_codigo) == ("validado", None)
+    assert (resultado.estado, resultado.motivo_codigo) == ("por_confirmar", None)
     assert (resultado.entidad, resultado.numero_operacion) == ("bcp", "00456789")
     assert resultado.monto == Decimal("85.40")
     assert resultado.fecha_pago == lima(2026, 10, 20, 10, 35)
@@ -140,7 +140,7 @@ def test_una_operacion_de_un_comprobante_rechazado_se_puede_usar(
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert (resultado.estado, resultado.numero_operacion) == ("validado", "00456789")
+    assert (resultado.estado, resultado.numero_operacion) == ("por_confirmar", "00456789")
 
 
 def test_el_mismo_numero_en_otra_entidad_no_es_duplicado(
@@ -154,7 +154,7 @@ def test_el_mismo_numero_en_otra_entidad_no_es_duplicado(
 
     resultado = aplicar(db, comprobante, BCP.lectura())
 
-    assert resultado.estado == "validado"
+    assert resultado.estado == "por_confirmar"
 
 
 def test_un_comprobante_resuelto_no_se_vuelve_a_aplicar(
@@ -166,4 +166,4 @@ def test_un_comprobante_resuelto_no_se_vuelve_a_aplicar(
     bloqueado = bloquear_comprobante(db, comprobante.id)
     assert bloqueado is not None
     assert aplicar_lectura(db, bloqueado, LecturaOcr([], 1)) is False
-    assert bloqueado.estado == "validado"
+    assert bloqueado.estado == "por_confirmar"
