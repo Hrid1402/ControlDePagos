@@ -5,6 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import ConfirmationService from 'primevue/confirmationservice'
+import ToastService from 'primevue/toastservice'
 import { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 import { rutas } from '@/router/rutas'
 import { instalarAcceso } from '@/router/guard'
@@ -133,7 +134,9 @@ describe('ocultar una opción del menú no autoriza', () => {
     await router.isReady()
     const wrapper = mount(defineComponent({ setup: () => () => h(RouterView) }), {
       attachTo: document.body,
-      global: { plugins: [router, [PrimeVue, configuracionUi], ConfirmationService] },
+      global: {
+        plugins: [router, [PrimeVue, configuracionUi], ConfirmationService, ToastService],
+      },
     })
     limpiezas.push(() => wrapper.unmount())
     await flushPromises()
