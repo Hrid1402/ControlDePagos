@@ -14,6 +14,8 @@ import type { CategoriaDeuda } from '@/components/deudas/listado'
 import { hoyEnLima } from '@/components/deudas/modelo'
 import { fijarDeuda, obtenerBandejaCompleta, recordarManana } from '@/api/bandeja'
 import { listarCategorias } from '@/api/categorias'
+import { subirComprobante } from '@/api/comprobantes'
+import { iniciarPago } from '@/api/deudas'
 import { useSesionStore } from '@/stores/sesion'
 import type { ErrorApi } from '@/types/api'
 
@@ -124,6 +126,59 @@ function posponer(id: string) {
     })
   })
 }
+
+// Adjuntar comprobante (CA05). La asistente adjunta sobre un pago iniciado: si la deuda todavía no
+// lo tiene, se inicia aquí con los mismos controles de límite que en el detalle. Un archivo que ya
+// se usó en otra deuda lo rechaza el backend con 409 DUPLICADO y su mensaje se muestra tal cual.
+const selectorArchivo = ref<HTMLInputElement | null>(null)
+let porAdjuntar: string | null = null
+
+function elegirComprobante(id: string) {
+  porAdjuntar = id
+  selectorArchivo.value?.click()
+}
+
+async function adjuntar(evento: Event) {
+  const entrada = evento.target as HTMLInputElement
+  const archivo = entrada.files?.[0]
+  entrada.value = ''
+  const item = items.value.find((i) => i.id === porAdjuntar)
+  porAdjuntar = null
+  if (!archivo || !item) return
+  await ejecutar(item.id, async () => {
+    if (!item.en_proceso) {
+      const inicio = await iniciarPago(item.id)
+      if (inicio.resultado === 'requiere_aprobacion') {
+        toast.add({
+          severity: 'info',
+          summary: 'Se pidió aprobación',
+          detail: 'Supera tu límite: el gerente debe aprobar el pago antes de hacerlo.',
+          life: 6000,
+        })
+        return
+      }
+    }
+    try {
+      await subirComprobante(item.id, archivo)
+    } catch (fallo) {
+      if ((fallo as ErrorApi).code !== 'DUPLICADO') throw fallo
+      toast.add({
+        severity: 'warn',
+        summary: 'Comprobante repetido',
+        detail: (fallo as ErrorApi).detail,
+        life: 8000,
+      })
+      return
+    }
+    seleccion.value = seleccion.value.filter((s) => s !== item.id)
+    toast.add({
+      severity: 'success',
+      summary: 'Comprobante adjuntado',
+      detail: 'Se está validando; lo verás en «Por validar».',
+      life: 5000,
+    })
+  })
+}
 </script>
 
 <template>
@@ -145,6 +200,21 @@ function posponer(id: string) {
     @abrir="abrir"
     @fijar="fijar"
     @posponer="posponer"
+    @adjuntar="elegirComprobante"
     @reintentar="cargar()"
   />
+  <input
+    ref="selectorArchivo"
+    type="file"
+    accept="application/pdf,image/jpeg,image/png"
+    class="oculto"
+    aria-label="Elegir el comprobante"
+    @change="adjuntar"
+  />
 </template>
+
+<style scoped>
+.oculto {
+  display: none;
+}
+</style>
