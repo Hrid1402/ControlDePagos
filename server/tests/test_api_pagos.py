@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.seguridad import crear_token
 from app.main import app
 from app.models import Limite, Usuario
-from tests.conftest import DosGerentes, nueva_deuda
+from tests.conftest import DosGerentes, asistente_anterior, en_proceso_por, nueva_deuda
 
 
 @pytest.fixture
@@ -73,14 +73,28 @@ def test_superar_el_limite_responde_200_con_la_solicitud(
     assert cuerpo["deuda"]["estado"] == "esperando_aprobacion"
 
 
-def test_otro_usuario_recibe_409(
+def test_el_gerente_no_inicia_pagos(
     cliente: TestClient, db: Session, dos_gerentes: DosGerentes
 ) -> None:
     equipo = dos_gerentes.uno
     deuda = nueva_deuda(db, equipo.gerente)
-    cliente.post(iniciar_ruta(deuda.id), headers=cabecera(equipo.asistente))
 
     r = cliente.post(iniciar_ruta(deuda.id), headers=cabecera(equipo.gerente))
+
+    assert (r.status_code, r.json()["code"]) == (403, "SIN_PERMISO")
+    db.refresh(deuda)
+    assert (deuda.estado, deuda.pago_iniciado_por) == ("pendiente", None)
+
+
+def test_otro_usuario_recibe_409(
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
+) -> None:
+    equipo = dos_gerentes.uno
+    deuda = en_proceso_por(
+        db, nueva_deuda(db, equipo.gerente), asistente_anterior(db, equipo.gerente)
+    )
+
+    r = cliente.post(iniciar_ruta(deuda.id), headers=cabecera(equipo.asistente))
 
     assert r.status_code == 409
     assert r.json() == {
@@ -186,14 +200,13 @@ def test_cancelar_sin_intento_responde_409(
     assert (r.status_code, r.json()["code"]) == (409, "SIN_INTENTO")
 
 
-@pytest.mark.parametrize("rol", ["gerente", "asistente"])
 def test_iniciar_una_deuda_esperando_recibo_responde_409(
-    cliente: TestClient, db: Session, dos_gerentes: DosGerentes, rol: str
+    cliente: TestClient, db: Session, dos_gerentes: DosGerentes
 ) -> None:
     equipo = dos_gerentes.uno
     deuda = nueva_deuda(db, equipo.gerente, monto=None, estado="esperando_recibo")
 
-    r = cliente.post(iniciar_ruta(deuda.id), headers=cabecera(getattr(equipo, rol)))
+    r = cliente.post(iniciar_ruta(deuda.id), headers=cabecera(equipo.asistente))
 
     assert r.status_code == 409
     assert r.json() == {

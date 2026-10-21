@@ -197,8 +197,8 @@ def test_un_intento_abandonado_no_se_libera_por_tiempo(
     iniciar_pago(db, equipo.asistente, deuda.id, origen=ORIGEN, ahora=hace_tres_dias)
 
     # Ninguna consulta ni nuevo intento lo libera: sigue reservado y del mismo dueño.
-    error = error_de(lambda: iniciar_pago(db, equipo.gerente, deuda.id, origen=ORIGEN))
-    assert error.code == "PAGO_EN_CURSO"
+    repetido = iniciar_pago(db, equipo.asistente, deuda.id, origen=ORIGEN)
+    assert repetido.repetido
     assert (deuda.estado, deuda.pago_iniciado_en) == ("en_proceso", hace_tres_dias)
     assert consumo_mes_pen(db, equipo.gerente.id, AHORA) == Decimal("100.00")
 

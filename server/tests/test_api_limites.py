@@ -188,6 +188,7 @@ def test_ca01_el_inicio_de_pago_aplica_los_limites_definidos_por_la_api(
         f"/api/v1/deudas/{nueva_deuda(db, equipo.gerente, monto='70.00').id}/iniciar-pago",
         headers=cabecera(equipo.asistente),
     )
+    # El gerente no paga: solo la asistente inicia pagos (TASK-109).
     gerente = cliente.post(
         f"/api/v1/deudas/{nueva_deuda(db, equipo.gerente, monto='900.00').id}/iniciar-pago",
         headers=cabecera(equipo.gerente),
@@ -197,7 +198,7 @@ def test_ca01_el_inicio_de_pago_aplica_los_limites_definidos_por_la_api(
     assert por_pago.json()["resultado"] == "requiere_aprobacion"
     # 90 reservados + 70 superan los 150 del mes.
     assert mensual.json()["resultado"] == "requiere_aprobacion"
-    assert gerente.json()["resultado"] == "iniciado"
+    assert (gerente.status_code, gerente.json()["code"]) == (403, "SIN_PERMISO")
     assert cliente.get(URL, headers=cabecera(equipo.gerente)).json()["consumo"]["reservado"] == (
         "90.00"
     )

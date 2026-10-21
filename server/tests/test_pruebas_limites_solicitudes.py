@@ -100,25 +100,24 @@ def test_ca04_consumo_del_mes_frente_al_limite(
     assert res_excede.resultado == ResultadoInicio.REQUIERE_APROBACION
 
 
-def test_ca05_pagos_del_gerente_no_tienen_limite(
+def test_ca05_el_gerente_no_inicia_pagos_ni_suma_al_consumo(
     db: Session,
     dos_gerentes: DosGerentes,
 ) -> None:
-    """CA05: Los pagos que realiza el gerente no tienen límite y no cuentan en el consumo."""
+    """CA05 tras TASK-109: el gerente ya no paga; sus intentos responden 403 y no suman."""
     gerente = dos_gerentes.uno.gerente
 
     # Fijar límite bajo
     fijar_limite(db, gerente.id, por_pago=Decimal("10.00"), mensual=Decimal("20.00"))
 
     # Gerente inicia pago grande en soles
-    deuda_soles = nueva_deuda(db, gerente, monto="5000.00")
-    res_soles = iniciar_pago(db, gerente, deuda_soles.id, origen=ORIGEN_PRUEBA)
-    assert res_soles.resultado == ResultadoInicio.INICIADO
-
-    # Gerente inicia pago en moneda extranjera
-    deuda_usd = nueva_deuda(db, gerente, monto="2500.00", moneda="USD")
-    res_usd = iniciar_pago(db, gerente, deuda_usd.id, origen=ORIGEN_PRUEBA)
-    assert res_usd.resultado == ResultadoInicio.INICIADO
+    for deuda in (
+        nueva_deuda(db, gerente, monto="5000.00"),
+        nueva_deuda(db, gerente, monto="2500.00", moneda="USD"),
+    ):
+        with pytest.raises(ErrorApi) as error:
+            iniciar_pago(db, gerente, deuda.id, origen=ORIGEN_PRUEBA)
+        assert error.value.code == "SIN_PERMISO"
 
     # No computa en el consumo del mes de la asistente
     assert consumo_mes_pen(db, gerente.id, AHORA_LIMA) == Decimal("0")

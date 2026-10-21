@@ -191,23 +191,24 @@ def test_el_segundo_pago_espera_al_primero_y_ve_su_reserva(
     assert final.resultado == ResultadoInicio.REQUIERE_APROBACION
 
 
-def test_la_misma_deuda_simultanea_queda_para_una_sola_persona(
+def test_la_misma_deuda_simultanea_se_inicia_una_sola_vez(
     confirmados: Callable[..., Confirmado], hilos: ThreadPoolExecutor
 ) -> None:
+    """Doble clic de la asistente: dos solicitudes a la vez sobre la misma deuda se turnan; la
+    segunda ve el intento de la primera y lo devuelve repetido, sin efectos nuevos."""
     equipo = confirmados("80.00")
     [deuda] = equipo.deudas
     salida = threading.Barrier(2, timeout=SEGUNDOS_MAXIMOS)
 
     futuros = [
-        hilos.submit(iniciar_y_confirmar, usuario, deuda, salida.wait)
-        for usuario in (equipo.asistente_id, equipo.gerente_id)
+        hilos.submit(iniciar_y_confirmar, equipo.asistente_id, deuda, salida.wait) for _ in range(2)
     ]
     resultados = [resultado(f) for f in futuros]
 
+    assert all(isinstance(r, InicioPago) for r in resultados)
     iniciados = [r for r in resultados if isinstance(r, InicioPago)]
-    errores = [r for r in resultados if isinstance(r, ErrorApi)]
-    assert [r.resultado for r in iniciados] == [ResultadoInicio.INICIADO]
-    assert [(e.status_code, e.code) for e in errores] == [(409, "PAGO_EN_CURSO")]
+    assert [r.resultado for r in iniciados] == [ResultadoInicio.INICIADO] * 2
+    assert sorted(r.repetido for r in iniciados) == [False, True]
     assert estados(equipo.deudas) == ["en_proceso"]
 
 

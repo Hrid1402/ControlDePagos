@@ -260,7 +260,8 @@ MATRIZ = [
         SIN_PERMISO,
         servicio,
     ),
-    Caso("POST", "/api/v1/deudas/{deuda_id}/iniciar-pago", "gerente_ajeno", NO_ENCONTRADO, deuda),
+    # El gerente no inicia pagos: el rol responde 403 antes de buscar la deuda (TASK-109).
+    Caso("POST", "/api/v1/deudas/{deuda_id}/iniciar-pago", "gerente_ajeno", SIN_PERMISO, deuda),
     Caso(
         "POST",
         "/api/v1/deudas/{deuda_id}/cancelar-inicio",
