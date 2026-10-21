@@ -21,10 +21,11 @@ vi.mock('@/api/bandeja', () => ({
 }))
 vi.mock('@/api/categorias', () => ({ listarCategorias: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/api/comprobantes', () => ({ subirComprobante: vi.fn() }))
-vi.mock('@/api/deudas', () => ({ iniciarPago: vi.fn() }))
+vi.mock('@/api/deudas', () => ({ iniciarPago: vi.fn(), cancelarInicio: vi.fn() }))
 const api = vi.mocked(bandeja)
 const subir = vi.mocked(comprobantes.subirComprobante)
 const iniciar = vi.mocked(deudas.iniciarPago)
+const cancelar = vi.mocked(deudas.cancelarInicio)
 
 const item = (cambios: Partial<ItemBandeja> = {}): ItemBandeja => ({
   id: 'd1',
@@ -146,6 +147,7 @@ describe('pantalla de la bandeja (H15)', () => {
 
   it('inicia el pago antes de adjuntar y avisa si el comprobante ya se usó (CA05)', async () => {
     iniciar.mockResolvedValue({ resultado: 'iniciado', repetido: false })
+    cancelar.mockResolvedValue()
     subir.mockRejectedValue({
       status: 409,
       code: 'DUPLICADO',
@@ -158,6 +160,8 @@ describe('pantalla de la bandeja (H15)', () => {
     expect(subir).toHaveBeenCalledWith('d1', archivo)
     expect(document.body.textContent).toContain('Comprobante repetido')
     expect(document.body.textContent).toContain('Este comprobante ya fue registrado.')
+    // El pago iniciado para esta subida se deshace: la deuda vuelve a como estaba.
+    expect(cancelar).toHaveBeenCalledWith('d1', null)
   })
 
   it('no sube el comprobante si el pago necesita aprobación del gerente', async () => {
@@ -193,6 +197,7 @@ describe('pantalla de la bandeja (H15)', () => {
 
     expect(iniciar).not.toHaveBeenCalled()
     expect(subir).toHaveBeenCalledOnce()
+    expect(cancelar).not.toHaveBeenCalled()
     expect(document.body.textContent).toContain('Comprobante adjuntado')
   })
 

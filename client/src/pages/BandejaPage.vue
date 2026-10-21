@@ -15,7 +15,7 @@ import { hoyEnLima } from '@/components/deudas/modelo'
 import { fijarDeuda, obtenerBandejaCompleta, recordarManana } from '@/api/bandeja'
 import { listarCategorias } from '@/api/categorias'
 import { subirComprobante } from '@/api/comprobantes'
-import { iniciarPago } from '@/api/deudas'
+import { cancelarInicio, iniciarPago } from '@/api/deudas'
 import { useSesionStore } from '@/stores/sesion'
 import type { ErrorApi } from '@/types/api'
 
@@ -141,6 +141,7 @@ function posponer(id: string) {
 // Adjuntar comprobante (CA05). La asistente adjunta sobre un pago iniciado: si la deuda todavía no
 // lo tiene, se inicia aquí con los mismos controles de límite que en el detalle. Un archivo que ya
 // se usó en otra deuda lo rechaza el backend con 409 DUPLICADO y su mensaje se muestra tal cual.
+// Si la subida falla, el pago que se inició aquí se cancela: la deuda queda como estaba.
 const selectorArchivo = ref<HTMLInputElement | null>(null)
 let porAdjuntar: string | null = null
 
@@ -157,6 +158,7 @@ async function adjuntar(evento: Event) {
   porAdjuntar = null
   if (!archivo || !item) return
   await ejecutar(item.id, async () => {
+    let iniciadoAqui = false
     if (!item.en_proceso) {
       const inicio = await iniciarPago(item.id)
       if (inicio.resultado === 'requiere_aprobacion') {
@@ -168,10 +170,12 @@ async function adjuntar(evento: Event) {
         })
         return
       }
+      iniciadoAqui = !inicio.repetido
     }
     try {
       await subirComprobante(item.id, archivo)
     } catch (fallo) {
+      if (iniciadoAqui) await cancelarInicio(item.id, null).catch(() => undefined)
       if ((fallo as ErrorApi).code !== 'DUPLICADO') throw fallo
       toast.add({
         severity: 'warn',
