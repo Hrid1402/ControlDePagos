@@ -84,6 +84,7 @@ export const SECCIONES: Record<Rol, Seccion[]> = {
       etiqueta: 'Bandeja',
       descripcion: 'Las deudas por atender, de la más urgente a la menos urgente.',
       principal: true,
+      pagina: () => import('@/pages/BandejaPage.vue'),
     },
     {
       clave: 'calendario',
